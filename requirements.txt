@@ -6,4 +6,5 @@ pytesseract
 Pillow
 aiohttp
 requests
+langdetect
 - torch
