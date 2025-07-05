@@ -1,9 +1,0 @@
-python-telegram-bot==20.3
-huggingface_hub
-transformers
-pytesseract
-pdfplumber
-Pillow
-aiohttp
-aiosqlite
-langdetect
