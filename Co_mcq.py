@@ -20,38 +20,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# تحويل الأرقام العربية إلى لاتينية
-ARABIC_DIGITS = {'١': '1', '٢': '2', '٣': '3', '٤': '4'}
-AR_LETTERS = {'أ': 0, 'ب': 1, 'ج': 2, 'د': 3}
+# دعم أرقام عربية من 1 إلى 8
+ARABIC_DIGITS = {'١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8'}
+# دعم حروف عربية من أ إلى ح (8 خيارات)
+AR_LETTERS = {'أ': 0, 'ب': 1, 'ج': 2, 'د': 3, 'ه': 4, 'و': 5, 'ز': 6, 'ح': 7}
 
-# أنماط الأسئلة المدعومة
+# أنماط الأسئلة، خيارات حتى H وأحرف عربية حتى ح
 PATTERNS = [
-    # صيغة إنجليزية: Q: ... A) ... Answer: B
     re.compile(
         r"Q[.:)]?\s*(?P<q>.+?)\s*"
-        r"(?P<opts>(?:[A-D][).:]\s*.+?\s*){2,10})"
-        r"(?:Answer|Ans|Correct Answer)[:：]?\s*(?P<ans>[A-Da-d1-4١-٤])",
+        r"(?P<opts>(?:[A-H][).:]\s*.+?\s*){2,10})"
+        r"(?:Answer|Ans|Correct Answer)[:：]?\s*(?P<ans>[A-Ha-h1-8١-٨])",
         re.S | re.IGNORECASE
     ),
-    # صيغة عربية: س: ... أ) ... الإجابة الصحيحة: ب
     re.compile(
         r"س[.:)]?\s*(?P<q>.+?)\s*"
-        r"(?P<opts>(?:[أ-د][).:]\s*.+?\s*){2,10})"
-        r"الإجابة\s+الصحيحة[:：]?\s*(?P<ans>[أ-د1-4١-٤])",
+        r"(?P<opts>(?:[أ-ح][).:]\s*.+?\s*){2,10})"
+        r"الإجابة\s+الصحيحة[:：]?\s*(?P<ans>[أ-ح1-8١-٨])",
         re.S
     ),
-    # صيغة عامة: سؤال\nأ) ...\nب) ...\nإجابة: ...
     re.compile(
         r"(?P<q>.+?)\n"
-        r"(?P<opts>(?:\s*[A-Za-zء-ي0-9]+[).:]\s*.+?\n){2,10})"
-        r"(?:Answer|الإجابة|Ans|Correct Answer)[:：]?\s*(?P<ans>[A-Za-zء-ي0-9١-٤])",
+        r"(?P<opts>(?:\s*[A-Za-zء-ي1-8١-٨]+[).:]\s*.+?\n){2,10})"
+        r"(?:Answer|الإجابة|Ans|Correct Answer)[:：]?\s*(?P<ans>[A-Za-zء-ي1-8١-٨])",
         re.S | re.IGNORECASE
     ),
 ]
 
-
 def parse_mcq(text: str):
-    """تحليل النص وتحويله إلى قائمة من (السؤال، الخيارات، رقم الإجابة الصحيحة)"""
     for patt in PATTERNS:
         m = patt.search(text)
         if not m:
@@ -62,7 +58,7 @@ def parse_mcq(text: str):
         opts = []
 
         for line in lines:
-            parts = re.split(r"^[A-Za-zء-ي١-٩0-9][).:]\s*", line.strip(), maxsplit=1)
+            parts = re.split(r"^[A-Hأ-حA-Ha-h1-8١-٨][).:]\s*", line.strip(), maxsplit=1)
             if len(parts) == 2:
                 opts.append(parts[1].strip())
 
@@ -72,7 +68,7 @@ def parse_mcq(text: str):
         try:
             if ans.isdigit():
                 idx = int(ans) - 1
-            elif ans.lower() in 'abcd':
+            elif ans.lower() in 'abcdefgh':
                 idx = ord(ans.lower()) - ord('a')
             elif raw_ans in AR_LETTERS:
                 idx = AR_LETTERS[raw_ans]
@@ -89,8 +85,29 @@ def parse_mcq(text: str):
             return [(q, shuffled, new_idx)]
     return []
 
+async def should_respond(update: Update, bot_username: str) -> bool:
+    """يرجع True إذا يجب على البوت الرد (رسالة خاصة أو تم ذكره في المجموعة/القناة)"""
+    message = update.message
+    if not message:
+        return False
+    if message.chat.type == 'private':
+        return True
+    # في القروبات والقنوات، يرد فقط إذا ذكر البوت
+    if message.entities is not None and message.text:
+        for ent in message.entities:
+            if ent.type == "mention":
+                mention = message.text[ent.offset:ent.offset + ent.length]
+                if mention.lower() == f"@{bot_username.lower()}":
+                    return True
+    return False
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
+    bot_username = context.bot.username
+    if not await should_respond(update, bot_username):
+        return  # لا يرد إذا لم يتم ذكره في المجموعة/القناة
+
     text = update.message.text
     blocks = [blk.strip() for blk in re.split(r"\n{2,}", text) if blk.strip()]
     sent = False
@@ -115,7 +132,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     is_anonymous=False,
                     protect_content=True,
                 )
-                # زر لإرسال سؤال جديد
                 kb = [[InlineKeyboardButton("👈 سؤال جديد", callback_data="new")]]
                 await update.message.reply_text(
                     "هل تريد إرسال سؤال آخر؟", reply_markup=InlineKeyboardMarkup(kb)
@@ -142,12 +158,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📘 الصيغ المدعومة", callback_data="help")]
     ]
     await update.message.reply_text(
-        "🤖 أهلاً! أرسل سؤالك بصيغة MCQ لتحويله إلى Quiz.",
+        f"🤖 أهلاً! أرسل سؤالك بصيغة MCQ لتحويله إلى Quiz.\n"
+        f"في المجموعات والقنوات، أذكرني باستخدام @{context.bot.username} لأجيب.",
         reply_markup=InlineKeyboardMarkup(kb)
     )
 
 
 async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.callback_query:
+        return
     await update.callback_query.answer()
     cmd = update.callback_query.data
     if cmd == 'help':
