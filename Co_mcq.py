@@ -9,7 +9,6 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
-    ChannelPostHandler,
     filters,
     ContextTypes,
 )
@@ -111,10 +110,6 @@ async def handle_mcq_message(message: Message, context: ContextTypes.DEFAULT_TYP
                     is_anonymous=False,
                     protect_content=True,
                 )
-                try:
-                    await message.delete()
-                except Exception as e:
-                    logger.warning(f"⚠️ فشل في حذف الرسالة: {e}")
                 kb = [[InlineKeyboardButton("👈 سؤال جديد", callback_data="new")]]
                 await context.bot.send_message(
                     chat_id=message.chat.id,
@@ -128,6 +123,12 @@ async def handle_mcq_message(message: Message, context: ContextTypes.DEFAULT_TYP
                     chat_id=message.chat.id,
                     text="⚠️ حدث خطأ أثناء إرسال السؤال."
                 )
+
+    if sent:
+        try:
+            await message.delete()
+        except Exception as e:
+            logger.warning(f"⚠️ فشل في حذف الرسالة: {e}")
 
     if not sent:
         buttons = [
@@ -143,10 +144,6 @@ async def handle_mcq_message(message: Message, context: ContextTypes.DEFAULT_TYP
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message and update.message.text:
         await handle_mcq_message(update.message, context)
-
-async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.channel_post and update.channel_post.text:
-        await handle_mcq_message(update.channel_post, context)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [
@@ -195,7 +192,6 @@ def main():
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('help', help_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_handler(ChannelPostHandler(handle_channel_post))
     app.add_handler(CallbackQueryHandler(callback_query_handler))
 
     logger.info("✅ Bot is running...")
