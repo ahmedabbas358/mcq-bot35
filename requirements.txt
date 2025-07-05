@@ -1,9 +1,9 @@
-python-telegram-bot==20.8
-pytesseract
+# requirements.txt
+python-telegram-bot==20.7
+transformers
 pdfplumber
+pytesseract
 Pillow
 aiohttp
-aiosqlite
-langdetect
-transformers
-torch
+requests
+- torch
