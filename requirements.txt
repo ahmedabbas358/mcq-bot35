@@ -1,0 +1,9 @@
+python-telegram-bot==20.8
+pytesseract
+pdfplumber
+Pillow
+aiohttp
+aiosqlite
+langdetect
+transformers
+torch
