@@ -1,9 +1,0 @@
-python-telegram-bot==20.7
-transformers
-pdfplumber
-pytesseract
-Pillow
-aiohttp
-requests
-langdetect
-
