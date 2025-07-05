@@ -1,3 +1,5 @@
+# file: co_mcq_bot.py
+
 import os
 import re
 import logging
@@ -23,11 +25,18 @@ logger = logging.getLogger(__name__)
 # تحويل الأرقام العربية إلى لاتينية
 ARABIC_DIGITS = {'١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'}
 AR_LETTERS = {
-    'أ': 0, 'ب': 1, 'ج': 2, 'د': 3,
-    'هـ': 4, 'و': 5, 'ز': 6, 'ح': 7, 'ط': 8
+    'أ': 0, 'إ': 0, 'ا': 0,
+    'ب': 1,
+    'ج': 2,
+    'د': 3,
+    'هـ': 4, 'ه': 4, 'ه‍': 4,
+    'و': 5,
+    'ز': 6,
+    'ح': 7,
+    'ط': 8,
+    'ي': 9, 'ى': 9
 }
 
-# أنماط الأسئلة المدعومة
 PATTERNS = [
     re.compile(
         r"Q[.:)]?\s*(?P<q>.+?)\s*"
@@ -37,14 +46,14 @@ PATTERNS = [
     ),
     re.compile(
         r"س[.:)]?\s*(?P<q>.+?)\s*"
-        r"(?P<opts>(?:[أ-ط][).:\-–—]?\s*.+?\s*){2,10})"
-        r"(?:الإجابة\s+الصحيحة|الإجابة)[:：]?\s*(?P<ans>[أ-ط1-9١-٩])",
+        r"(?P<opts>(?:[أ-ي][).:\-–—]?\s*.+?\s*){2,10})"
+        r"(?:الإجابة\s+الصحيحة|الإجابة)[:：]?\s*(?P<ans>[أ-ي1-9١-٩])",
         re.S
     ),
     re.compile(
         r"(?P<q>.+?)\n"
-        r"(?P<opts>(?:\s*[A-Za-zء-ي0-9][).:\-–—]?\s*.+?\n){2,10})"
-        r"(?:Answer|الإجابة|Ans|Correct Answer)[:：]?\s*(?P<ans>[A-Za-zء-ي0-9١-٩])",
+        r"(?P<opts>(?:\s*[\(\[]?[A-Za-zأ-ي0-9][\)\].:\-–—]?\s*.+?\n){2,10})"
+        r"(?:Answer|الإجابة|Ans|Correct Answer)[:：]?\s*(?P<ans>[A-Za-zأ-ي0-9١-٩])",
         re.S | re.IGNORECASE
     ),
 ]
@@ -58,7 +67,7 @@ def parse_mcq(text: str):
             opts = []
 
             for line in lines:
-                parts = re.split(r"^[A-Za-zء-ي١-٩0-9][).:\-–—]?\s*", line.strip(), maxsplit=1)
+                parts = re.split(r"^\s*[\(\[]?[A-Za-zأ-ي٠-٩0-9][\)\].:\-–—]?\s*", line.strip(), maxsplit=1)
                 if len(parts) == 2:
                     opts.append(parts[1].strip())
 
@@ -110,12 +119,13 @@ async def handle_mcq_message(message: Message, context: ContextTypes.DEFAULT_TYP
                     is_anonymous=False,
                     protect_content=True,
                 )
-                kb = [[InlineKeyboardButton("👈 سؤال جديد", callback_data="new")]]
-                await context.bot.send_message(
-                    chat_id=message.chat.id,
-                    text="هل تريد إرسال سؤال آخر؟",
-                    reply_markup=InlineKeyboardMarkup(kb)
-                )
+                if message.chat.type != "channel":
+                    kb = [[InlineKeyboardButton("👈 سؤال جديد", callback_data="new")]]
+                    await context.bot.send_message(
+                        chat_id=message.chat.id,
+                        text="هل تريد إرسال سؤال آخر؟",
+                        reply_markup=InlineKeyboardMarkup(kb)
+                    )
                 await asyncio.sleep(1)
             except Exception as e:
                 logger.error(f"Error sending poll: {e}")
@@ -124,7 +134,7 @@ async def handle_mcq_message(message: Message, context: ContextTypes.DEFAULT_TYP
                     text="⚠️ حدث خطأ أثناء إرسال السؤال."
                 )
 
-    if sent:
+    if sent and message.chat.type != "channel":
         try:
             await message.delete()
         except Exception as e:
@@ -142,8 +152,12 @@ async def handle_mcq_message(message: Message, context: ContextTypes.DEFAULT_TYP
         )
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message and update.message.text:
+    if update.message and update.effective_chat.type != "channel":
         await handle_mcq_message(update.message, context)
+
+async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.channel_post:
+        await handle_mcq_message(update.channel_post, context)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [
@@ -191,8 +205,9 @@ def main():
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('help', help_command))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(CallbackQueryHandler(callback_query_handler))
+    app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.TEXT, handle_channel_post))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     logger.info("✅ Bot is running...")
     app.run_polling()
