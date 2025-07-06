@@ -9,7 +9,7 @@ import gc
 from asyncio import Lock
 
 import aiosqlite
-from telegram import Update, Poll, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
+from telegram import Update, Poll, InlineKeyboardButton, InlineKeyboard Markup, InlineQueryResultArticle, InputTextMessageContent
 from telegram.constants import PollType
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -601,6 +601,8 @@ async def main():
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     if not token:
         raise RuntimeError("❌ لم يتم تحديد توكن البوت.")
+    
+    # إنشاء التطبيق
     app = Application.builder().token(token).build()
 
     # تهيئة قاعدة البيانات
@@ -626,11 +628,28 @@ async def main():
     # تشغيل البوت
     try:
         logger.info('✅ البوت يعمل...')
+        # تهيئة التطبيق
+        await app.initialize()
+        # تشغيل البوت في وضع polling
         await app.run_polling()
+    except Exception as e:
+        logger.error(f"خطأ في تشغيل البوت: {e}")
     finally:
-        await cleanup_db(db, app.bot_data['db_lock'])
-        await db.close()
-        gc.collect()
+        # إغلاق التطبيق وقاعدة البيانات
+        try:
+            await app.shutdown()
+            await cleanup_db(db, app.bot_data['db_lock'])
+            await db.close()
+        except Exception as e:
+            logger.error(f"خطأ أثناء الإغلاق: {e}")
+        finally:
+            gc.collect()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    if loop.is_running():
+        # إذا كانت الحلقة قيد التشغيل، استخدمها مباشرة
+        loop.create_task(main())
+    else:
+        # إذا لم تكن الحلقة قيد التشغيل، شغلها
+        loop.run_until_complete(main())
