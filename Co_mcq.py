@@ -370,20 +370,17 @@ async def main():
 
     app = Application.builder().token(token).build()
 
-    # أوامر أساسية
+    # تسجيل الهاندلرز هنا
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('help', help_command))
     app.add_handler(CommandHandler('stats', stats_command))
     app.add_handler(CommandHandler('channels', channels_command))
-
-    # إدارة القنوات
     app.add_handler(CommandHandler('addchannel', addchannel_command))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_addchannel_msg))
     app.add_handler(CommandHandler('createpoll', createpoll_command))
     app.add_handler(CallbackQueryHandler(callback_query_handler))
 
-    # التعامل مع MCQ
     app.add_handler(MessageHandler(filters.ChatType.CHANNEL & (filters.TEXT | filters.Caption()), handle_channel_post))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_addchannel_msg))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(InlineQueryHandler(inline_query))
 
@@ -391,4 +388,13 @@ async def main():
     await app.run_polling()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    import asyncio
+    try:
+        asyncio.get_event_loop().run_until_complete(main())
+    except RuntimeError as e:
+        if "already running" in str(e):
+            import nest_asyncio
+            nest_asyncio.apply()
+            asyncio.get_event_loop().run_until_complete(main())
+        else:
+            raise
