@@ -9,13 +9,11 @@ import gc
 from asyncio import Lock
 
 import aiosqlite
-from telegram import (
-    Update, Poll, PollType, InlineKeyboardButton, InlineKeyboardMarkup,
-    InlineQueryResultArticle, InputTextMessageContent
-)
+from telegram import Update, Poll, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
+from telegram.constants import PollType  # استيراد PollType من telegram.constants
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
-    CallbackQueryHandler, InlineQueryHandler, filters, ContextTypes
+    CallbackQueryHandler, InlineQueryHandler, Filters, ContextTypes
 )
 
 # إعداد التسجيل
@@ -180,14 +178,14 @@ async def process_queue(chat_id, context):
                 poll_message = await context.bot.send_poll(
                     chat_id, qst, opts, type=PollType.QUIZ,
                     correct_option_id=idx, is_anonymous=is_anonymous,
-                    parse_mode='Markdown'
+                    parse_mode='MarkdownV2'
                 )
                 if sender_user and not is_anonymous:
                     lang = detect_language(qst)
                     text = get_text('sent_by', lang, user=sender_user.first_name, user_id=sender_user.id)
                     await context.bot.send_message(
                         chat_id, text, reply_to_message_id=poll_message.message_id,
-                        parse_mode='Markdown'
+                        parse_mode='MarkdownV2'
                     )
                 await asyncio.sleep(min(RATE_LIMIT_DELAY, len(qst) / 50))
                 retry_counts[(chat_id, qst)] = 0
@@ -289,7 +287,7 @@ async def enqueue_channel_mcq(post, context):
     return sent
 
 # معالجة النصوص
-async def handle_text(update, context):
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg or (not msg.text and not msg.caption):
         return
@@ -360,7 +358,7 @@ async def handle_text(update, context):
             await context.bot.send_message(msg.chat.id, get_text('invalid_format', lang))
 
 # معالجة منشورات القنوات
-async def handle_channel_post(update, context):
+async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     post = update.channel_post
     if not post:
         return
@@ -376,7 +374,7 @@ async def handle_channel_post(update, context):
                 logger.warning(f"فشل الحذف: {e}")
 
 # الأوامر
-async def start(update, context):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = detect_language(update.message.text or '') if update.message else 'en'
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton('📝 سؤال جديد', callback_data='new')],
@@ -389,7 +387,7 @@ async def start(update, context):
     ])
     await update.message.reply_text(get_text('start', lang), reply_markup=kb)
 
-async def callback_query_handler(update, context):
+async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cmd = update.callback_query.data
     uid = update.effective_user.id
     lang = detect_language(update.callback_query.message.text or '') if update.callback_query.message else 'en'
@@ -489,9 +487,9 @@ async def callback_query_handler(update, context):
         return
     else:
         txt = '⚠️ غير مدعوم'
-    await update.callback_query.edit_message_text(txt, parse_mode='Markdown')
+    await update.callback_query.edit_message_text(txt, parse_mode='MarkdownV2')
 
-async def inline_query(update, context):
+async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         q = update.inline_query.query
         if not q:
@@ -502,7 +500,7 @@ async def inline_query(update, context):
             qst, opts, idx = match[0]
             if 2 <= len(opts) <= 10 and 0 <= idx < len(opts):
                 res_text = f"*{sanitize_markdown(qst)}*\n" + "\n".join([f"{chr(65+i)}) {opt}{' ✅' if i == idx else ''}" for i, opt in enumerate(opts)])
-                results = [InlineQueryResultArticle(id='1', title='عرض السؤال', input_message_content=InputTextMessageContent(res_text, parse_mode='Markdown'))]
+                results = [InlineQueryResultArticle(id='1', title='عرض السؤال', input_message_content=InputTextMessageContent(res_text, parse_mode='MarkdownV2'))]
                 await update.inline_query.answer(results)
             else:
                 results = [InlineQueryResultArticle(id='1', title='تحويل سؤال MCQ', input_message_content=InputTextMessageContent(get_text('invalid_format', lang)))]
@@ -516,11 +514,11 @@ async def inline_query(update, context):
         results = [InlineQueryResultArticle(id='1', title='خطأ', input_message_content=InputTextMessageContent(get_text('error', lang)))]
         await update.inline_query.answer(results)
 
-async def help_command(update, context):
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = detect_language(update.message.text or '') if update.message else 'en'
     await update.message.reply_text(get_text('help', lang))
 
-async def stats_command(update, context):
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     lang = detect_language(update.message.text or '') if update.message else 'en'
     db = context.bot_data.get('db')
@@ -538,7 +536,7 @@ async def stats_command(update, context):
         monthly = sent if last_sent >= month_ago else 0
     await update.message.reply_text(get_text('stats', lang, sent=sent, ch=ch, weekly=weekly, monthly=monthly))
 
-async def channels_command(update, context):
+async def channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = detect_language(update.message.text or '') if update.message else 'en'
     db = context.bot_data.get('db')
     lock = context.bot_data.get('db_lock')
@@ -547,20 +545,20 @@ async def channels_command(update, context):
         await update.message.reply_text("لا توجد قنوات مسجلة بعد.")
         return
     text = "📡 القنوات المسجلة:\n" + "\n".join([f"- {title}: {channel_id}" for channel_id, title in rows])
-    await update.message.reply_text(text, parse_mode='Markdown')
+    await update.message.reply_text(text, parse_mode='MarkdownV2')
 
-async def cancel_command(update, context):
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = detect_language(update.message.text or '') if update.message else 'en'
     context.user_data.pop('state', None)
     context.user_data.pop('target_channel', None)
     await update.message.reply_text(get_text('cancel', lang))
 
-async def new_command(update, context):
+async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = detect_language(update.message.text or '') if update.message else 'en'
     context.user_data['state'] = 'waiting_mcq'
     await update.message.reply_text(get_text('awaiting_mcq', lang))
 
-async def publish_channel_command(update, context):
+async def publish_channel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = detect_language(update.message.text or '') if update.message else 'en'
     context.user_data['state'] = 'waiting_mcq'
     db = context.bot_data.get('db')
@@ -573,7 +571,7 @@ async def publish_channel_command(update, context):
     markup = InlineKeyboardMarkup(buttons)
     await update.message.reply_text("📡 اختر القناة للنشر:", reply_markup=markup)
 
-async def top_users_command(update, context):
+async def top_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = detect_language(update.message.text or '') if update.message else 'en'
     db = context.bot_data.get('db')
     lock = context.bot_data.get('db_lock')
@@ -620,8 +618,8 @@ async def main():
     app.add_handler(CommandHandler('top_users', top_users_command))
     app.add_handler(CallbackQueryHandler(callback_query_handler))
     app.add_handler(InlineQueryHandler(inline_query))
-    app.add_handler(MessageHandler(filters.ChatType.CHANNEL & (filters.TEXT | filters.Caption()), handle_channel_post))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(MessageHandler(Filters.chat_type.channel & (Filters.text | Filters.caption), handle_channel_post))
+    app.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
 
     # تشغيل البوت
     try:
