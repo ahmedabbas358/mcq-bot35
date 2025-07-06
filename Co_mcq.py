@@ -1,18 +1,19 @@
-# file: co_mcq_bot.py
-
+# co_mcq_bot.py - النسخة المحسنة مع التعديلات المقترحة
 import os
 import re
 import logging
 import random
 import asyncio
-from telegram import Update, Poll, InlineKeyboardButton, InlineKeyboardMarkup, Message
+import sqlite3
+import time
+from collections import defaultdict, deque
+from telegram import (
+    Update, Poll, InlineKeyboardButton, InlineKeyboardMarkup,
+    InlineQueryResultArticle, InputTextMessageContent, Message
+)
 from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    CallbackQueryHandler,
-    filters,
-    ContextTypes,
+    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
+    InlineQueryHandler, filters, ContextTypes
 )
 
 # إعداد سجل الأحداث
@@ -22,195 +23,190 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# تحويل الأرقام العربية إلى لاتينية
-ARABIC_DIGITS = {'١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'}
-AR_LETTERS = {
-    'أ': 0, 'إ': 0, 'ا': 0,
-    'ب': 1,
-    'ج': 2,
-    'د': 3,
-    'هـ': 4, 'ه': 4, 'ه‍': 4,
-    'و': 5,
-    'ز': 6,
-    'ح': 7,
-    'ط': 8,
-    'ي': 9, 'ى': 9
-}
+# اتصال بقاعدة بيانات SQLite للإحصائيات والأسئلة المرسلة
+conn = sqlite3.connect('stats.db', check_same_thread=False)
+cursor = conn.cursor()
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS user_stats (
+    user_id INTEGER PRIMARY KEY,
+    sent INTEGER DEFAULT 0
+)''')
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS channel_stats (
+    chat_id INTEGER PRIMARY KEY,
+    sent INTEGER DEFAULT 0
+)''')
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS sent_questions (
+    chat_id INTEGER,
+    hash INTEGER,
+    PRIMARY KEY(chat_id, hash)
+)''')
+conn.commit()
 
+# ذاكرة قائمة الانتظار وتنظيم الإرسال
+send_queues = defaultdict(lambda: deque())
+last_sent_time = defaultdict(float)
+
+# إعداد ثابتات
+ARABIC_DIGITS = {'١': '1', '٢': '2', '٣': '3', '٤': '4'}
+AR_LETTERS = {'أ': 0, 'ب': 1, 'ج': 2, 'د': 3}
 PATTERNS = [
-    re.compile(
-        r"Q[.:)]?\s*(?P<q>.+?)\s*"
-        r"(?P<opts>(?:[A-J][).:\-–—]?\s*.+?\s*){2,10})"
-        r"(?:Answer|Ans|Correct Answer)[:：]?\s*(?P<ans>[A-Ja-j1-9١-٩])",
-        re.S | re.IGNORECASE
-    ),
-    re.compile(
-        r"س[.:)]?\s*(?P<q>.+?)\s*"
-        r"(?P<opts>(?:[أ-ي][).:\-–—]?\s*.+?\s*){2,10})"
-        r"(?:الإجابة\s+الصحيحة|الإجابة)[:：]?\s*(?P<ans>[أ-ي1-9١-٩])",
-        re.S
-    ),
-    re.compile(
-        r"(?P<q>.+?)\n"
-        r"(?P<opts>(?:\s*[\(\[]?[A-Za-zأ-ي0-9][\)\].:\-–—]?\s*.+?\n){2,10})"
-        r"(?:Answer|الإجابة|Ans|Correct Answer)[:：]?\s*(?P<ans>[A-Za-zأ-ي0-9١-٩])",
-        re.S | re.IGNORECASE
-    ),
+    re.compile(r"Q[.:)]?\s*(?P<q>.+?)\s*(?P<opts>(?:[A-D][).:]\s*.+?\s*){2,10})"
+               r"(?:Answer|Ans|Correct Answer)[:：]?\s*(?P<ans>[A-Da-d1-4١-٤])",
+               re.S|re.IGNORECASE),
+    re.compile(r"س[.:)]?\s*(?P<q>.+?)\s*(?P<opts>(?:[أ-د][).:]\s*.+?\s*){2,10})"
+               r"الإجابة\s+الصحيحة[:：]?\s*(?P<ans>[أ-د1-4١-٤])",
+               re.S),
+    re.compile(r"(?P<q>.+?)\n(?P<opts>(?:\s*[A-Za-zء-ي0-9]+[).:]\s*.+?\n){2,10})"
+               r"(?:Answer|الإجابة|Ans|Correct Answer)[:：]?\s*(?P<ans>[A-Za-zء-ي0-9١-٤])",
+               re.S|re.IGNORECASE),
 ]
 
-def parse_mcq(text: str):
-    results = []
+# نصوص متعددة اللغات
+TEXTS = {
+    'start': {'en':'🤖 Hi! Choose an option:','ar':'🤖 أهلاً! اختر من القائمة:'},
+    'help': {'en':'Usage:\n- Send MCQ in private.\n- Mention me or reply.\n-Q:/س: formats','ar':'🆘 كيفية الاستخدام:\n- في الخاص أرسل السؤال.\n- في المجموعات @bot أو الرد.\n- الصيغ: Q:/س:'},
+    'new': {'en':'📩 Send your MCQ now!','ar':'📩 أرسل سؤال MCQ الآن!'},
+    'stats':{'en':'📊 You sent {sent} questions.✉️ Channel posts: {ch}','ar':'📊 أرسلت {sent} سؤالاً.🏷️ منشورات القناة: {ch}'},
+    'queue_full':{'en':'🚫 Queue full, send fewer questions.','ar':'🚫 القائمة ممتلئة، أرسل أقل.'},
+    'no_q': {'en':'❌ No questions detected.','ar':'❌ لم أتعرف على أي سؤال.'},
+    'error_poll':{'en':'⚠️ Failed to send question.','ar':'⚠️ فشل في إرسال السؤال.'}
+}
+
+def get_text(key, lang):
+    return TEXTS[key].get(lang,'')
+
+# تحليل MCQ
+def parse_mcq(text, chat_id):
+    res=[]
     for patt in PATTERNS:
         for m in patt.finditer(text):
-            q = m.group('q').strip()
-            lines = m.group('opts').strip().splitlines()
-            opts = []
-
-            for line in lines:
-                parts = re.split(r"^\s*[\(\[]?[A-Za-zأ-ي٠-٩0-9][\)\].:\-–—]?\s*", line.strip(), maxsplit=1)
-                if len(parts) == 2:
-                    opts.append(parts[1].strip())
-
-            raw_ans = m.group('ans').strip()
-            ans = ARABIC_DIGITS.get(raw_ans, raw_ans)
-
-            try:
-                if ans.isdigit():
-                    idx = int(ans) - 1
-                elif ans.lower() in 'abcdefghij':
-                    idx = ord(ans.lower()) - ord('a')
-                elif raw_ans in AR_LETTERS:
-                    idx = AR_LETTERS[raw_ans]
-                else:
-                    continue
-            except Exception:
+            q=m.group('q').strip()
+            h=hash(q)
+            cursor.execute('SELECT 1 FROM sent_questions WHERE chat_id=? AND hash=?',(chat_id,h))
+            if cursor.fetchone():
                 continue
-
-            if len(opts) < 2 or len(opts) > 10:
+            # سجل السؤال
+            cursor.execute('INSERT INTO sent_questions(chat_id,hash) VALUES(?,?)',(chat_id,h))
+            conn.commit()
+            lines=m.group('opts').strip().splitlines()
+            opts=[re.split(r'^[A-Za-zء-ي١-٩0-9][).:]\s*',ln.strip(),1)[1]
+                  for ln in lines if len(re.split(r'^[A-Za-zء-ي١-٩0-9][).:]\s*',ln.strip(),1))>1]
+            if not 2<=len(opts)<=10:
                 continue
-
-            if 0 <= idx < len(opts):
-                pairs = list(enumerate(opts))
-                random.shuffle(pairs)
-                shuffled = [opt for _, opt in pairs]
-                new_idx = next(i for i, (orig, _) in enumerate(pairs) if orig == idx)
-                results.append((q, shuffled, new_idx))
-    return results
-
-async def handle_mcq_message(message: Message, context: ContextTypes.DEFAULT_TYPE):
-    text = message.text
-    blocks = [blk.strip() for blk in re.split(r"\n{2,}", text) if blk.strip()]
-    sent = False
-
-    for blk in blocks:
-        mcqs = parse_mcq(blk)
-        if not mcqs:
-            continue
-
-        sent = True
-        for question, opts, correct in mcqs:
+            raw=m.group('ans').strip();ans=ARABIC_DIGITS.get(raw,raw)
             try:
-                await context.bot.send_poll(
-                    chat_id=message.chat.id,
-                    question=question,
-                    options=opts,
-                    type=Poll.QUIZ,
-                    correct_option_id=correct,
-                    is_anonymous=False,
-                    protect_content=True,
-                )
-                if message.chat.type != "channel":
-                    kb = [[InlineKeyboardButton("👈 سؤال جديد", callback_data="new")]]
-                    await context.bot.send_message(
-                        chat_id=message.chat.id,
-                        text="هل تريد إرسال سؤال آخر؟",
-                        reply_markup=InlineKeyboardMarkup(kb)
-                    )
-                await asyncio.sleep(1)
-            except Exception as e:
-                logger.error(f"Error sending poll: {e}")
-                await context.bot.send_message(
-                    chat_id=message.chat.id,
-                    text="⚠️ حدث خطأ أثناء إرسال السؤال."
-                )
+                idx=int(ans)-1 if ans.isdigit() else ord(ans.lower())-ord('a') if ans.lower() in 'abcd' else AR_LETTERS.get(raw)
+            except:
+                continue
+            if idx is None or not 0<=idx<len(opts): continue
+            res.append((q,opts,idx))
+    return res
 
-    if sent and message.chat.type != "channel":
+# إرسال قائمة الانتظار
+async def process_queue(chat_id,context):
+    q=send_queues[chat_id]
+    while q:
+        qst,opts,idx=q.popleft()
         try:
-            await message.delete()
-        except Exception as e:
-            logger.warning(f"⚠️ فشل في حذف الرسالة: {e}")
+            await context.bot.send_poll(chat_id, qst, opts, type=Poll.QUIZ, correct_option_id=idx, is_anonymous=False)
+            await asyncio.sleep(0.5)
+        except:
+            break
 
-    if not sent:
-        buttons = [
-            [InlineKeyboardButton("📝 مثال MCQ", callback_data="example")],
-            [InlineKeyboardButton("📘 كيف أصيغ السؤال؟", callback_data="help")]
-        ]
-        await context.bot.send_message(
-            chat_id=message.chat.id,
-            text="❌ لم أتعرف على أي سؤال. استخدم أحد الصيغ المدعومة.",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
+async def enqueue_mcq(message,context):
+    chat_id=message.chat.id
+    if len(send_queues[chat_id])>50:
+        lang=(message.from_user.language_code or 'en')[:2]
+        await context.bot.send_message(chat_id, get_text('queue_full',lang))
+        return False
+    text=message.text or message.caption or ''
+    blocks=[b.strip() for b in re.split(r"\n{2,}",text) if b.strip()]
+    sent=False
+    for blk in blocks:
+        lst=parse_mcq(blk,chat_id)
+        for item in lst:
+            send_queues[chat_id].append(item);sent=True
+    if sent:
+        asyncio.create_task(process_queue(chat_id,context))
+    return sent
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message and update.effective_chat.type != "channel":
-        await handle_mcq_message(update.message, context)
-
-async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.channel_post:
-        await handle_mcq_message(update.channel_post, context)
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kb = [
-        [InlineKeyboardButton("📝 مثال جاهز", callback_data="example")],
-        [InlineKeyboardButton("📘 الصيغ المدعومة", callback_data="help")]
-    ]
-    await update.message.reply_text(
-        "🤖 أهلاً! أرسل سؤالك بصيغة MCQ لتحويله إلى Quiz.",
-        reply_markup=InlineKeyboardMarkup(kb)
-    )
-
-async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    cmd = update.callback_query.data
-    if cmd == 'help':
-        text = (
-            "✅ الصيغ المدعومة:\n"
-            "Q: ما هو عاصمة فرنسا؟\nA) برلين\nB) باريس\nC) مدريد\nD) روما\nAnswer: B\n\n"
-            "س: ما هو عاصمة مصر؟\nأ) الخرطوم\nب) القاهرة\nج) الرياض\nد) تونس\nالإجابة: ب"
-        )
-    elif cmd == 'example':
-        text = (
-            "📝 مثال MCQ:\n"
-            "Q: What is 2+2?\nA) 3\nB) 4\nC) 5\nD) 6\nAnswer: B"
-        )
-    elif cmd == 'new':
-        text = "📩 أرسل الآن سؤالًا جديدًا بصيغة MCQ!"
+async def handle_text(update,context):
+    msg=update.message
+    if not msg or (not msg.text and not msg.caption): return
+    uid=msg.from_user.id; ct=msg.chat.type; lang=(msg.from_user.language_code or 'en')[:2]
+    if time.time()-last_sent_time[uid]<5: return
+    last_sent_time[uid]=time.time()
+    if ct=='private':
+        if await enqueue_mcq(msg,context):
+            cursor.execute('INSERT OR IGNORE INTO user_stats VALUES(?,0)',(uid,))
+            cursor.execute('UPDATE user_stats SET sent=sent+? WHERE user_id=?',(len(send_queues[msg.chat.id]),uid))
+            conn.commit();
+            try: await msg.delete()
+            except: pass
     else:
-        text = "⚠️ الأمر غير مدعوم."
-    await update.callback_query.edit_message_text(text)
+        botun=context.bot.username.lower() if context.bot.username else ''
+        if ct in ['group','supergroup'] and ((msg.reply_to_message and msg.reply_to_message.from_user.id==context.bot.id)
+            or (botun and f"@{botun}" in (msg.text or msg.caption).lower())):
+            await enqueue_mcq(msg,context)
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🆘 استخدم أحد الصيغ التالية:\n"
-        "Q: السؤال؟\nA) خيار1\nB) خيار2\nC) خيار3\nD) خيار4\nAnswer: B\n\n"
-        "أو بالعربية:\nس: السؤال؟\nأ) ...\nب) ...\nالإجابة: ب"
-    )
+async def handle_channel_post(update,context):
+    post=update.channel_post
+    if post and await enqueue_mcq(post,context):
+        cid=post.chat.id
+        cursor.execute('INSERT OR IGNORE INTO channel_stats VALUES(?,0)',(cid,))
+        cursor.execute('UPDATE channel_stats SET sent=sent+? WHERE chat_id=?',(len(send_queues[cid]),cid))
+        conn.commit()
+
+async def start(update,context):
+    lang=(update.effective_user.language_code or 'en')[:2]
+    kb=InlineKeyboardMarkup([
+        [InlineKeyboardButton('📝 سؤال جديد','new')],[InlineKeyboardButton('📊 إحصائياتي','stats')],
+        [InlineKeyboardButton('📘 المساعدة','help')]
+    ])
+    await update.message.reply_text(get_text('start',lang),reply_markup=kb)
+
+async def callback_query_handler(update,context):
+    cmd=update.callback_query.data;uid=update.effective_user.id;lang=(update.effective_user.language_code or 'en')[:2]
+    if cmd=='help': txt=get_text('help',lang)
+    elif cmd=='new': txt=get_text('new',lang)
+    elif cmd=='stats':
+        cursor.execute('SELECT sent FROM user_stats WHERE user_id=?',(uid,));r=cursor.fetchone();sent=r[0] if r else 0
+        cursor.execute('SELECT sent FROM channel_stats WHERE chat_id=?',(update.effective_chat.id,));r=cursor.fetchone();ch=r[0] if r else 0
+        txt=get_text('stats',lang).format(sent=sent,ch=ch)
+    else: txt='⚠️ غير مدعوم'
+    await update.callback_query.edit_message_text(txt)
+
+async def inline_query(update,context):
+    try:
+        q=update.inline_query.query
+        if not q: return
+        res=[InlineQueryResultArticle(id='1',title='تحويل سؤال MCQ',input_message_content=InputTextMessageContent(q))]
+        await update.inline_query.answer(res)
+    except Exception as e:
+        logger.error(f"Inline error: {e}")
+
+async def help_command(update,context):
+    lang=(update.effective_user.language_code or 'en')[:2]
+    await update.message.reply_text(get_text('help',lang))
+
+async def stats_command(update,context):
+    uid=update.effective_user.id;lang=(update.effective_user.language_code or 'en')[:2]
+    cursor.execute('SELECT sent FROM user_stats WHERE user_id=?',(uid,));r=cursor.fetchone();sent=r[0] if r else 0
+    cursor.execute('SELECT sent FROM channel_stats WHERE chat_id=?',(update.effective_chat.id,));r=cursor.fetchone();ch=r[0] if r else 0
+    await update.message.reply_text(get_text('stats',lang).format(sent=sent,ch=ch))
+
 
 def main():
-    token = os.getenv('TELEGRAM_BOT_TOKEN')
-    if not token:
-        logger.error("❌ TELEGRAM_BOT_TOKEN غير مضبوط في البيئة!")
-        return
+    token=os.getenv('TELEGRAM_BOT_TOKEN')
+    if not token: logger.error('❌ TELEGRAM_BOT_TOKEN missing');return
+    app=Application.builder().token(token).build()
+    app.add_handler(CommandHandler('start',start));app.add_handler(CommandHandler('help',help_command))
+    app.add_handler(CommandHandler('stats',stats_command));app.add_handler(CallbackQueryHandler(callback_query_handler))
+    app.add_handler(InlineQueryHandler(inline_query));app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.TEXT,handle_channel_post))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,handle_text))
+    logger.info('✅ Bot is running...');app.run_polling()
 
-    app = Application.builder().token(token).build()
-    app.add_handler(CommandHandler('start', start))
-    app.add_handler(CommandHandler('help', help_command))
-    app.add_handler(CallbackQueryHandler(callback_query_handler))
-    app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.TEXT, handle_channel_post))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+if __name__=='__main__':main()
 
-    logger.info("✅ Bot is running...")
-    app.run_polling()
-
-if __name__ == '__main__':
-    main()
