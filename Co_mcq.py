@@ -1,7 +1,10 @@
+# co_mcq_bot.py – النسخة الشاملة والمحسّنة بدقة عالية مع استرجاع كل الخصائص الأصلية
+
 import os
 import re
 import logging
 import asyncio
+import hashlib
 import sqlite3
 import time
 from collections import defaultdict, deque
@@ -21,14 +24,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# قاعدة البيانات SQLite
+# قاعدة البيانات
 conn = sqlite3.connect('stats.db', check_same_thread=False)
 cursor = conn.cursor()
 
-# إنشاء الجداول
 cursor.execute('''CREATE TABLE IF NOT EXISTS user_stats (user_id INTEGER PRIMARY KEY, sent INTEGER DEFAULT 0)''')
 cursor.execute('''CREATE TABLE IF NOT EXISTS channel_stats (chat_id INTEGER PRIMARY KEY, sent INTEGER DEFAULT 0)''')
-cursor.execute('''CREATE TABLE IF NOT EXISTS sent_questions (chat_id INTEGER, hash INTEGER, PRIMARY KEY(chat_id, hash))''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS sent_questions (chat_id INTEGER, hash TEXT, PRIMARY KEY(chat_id, hash))''')
 cursor.execute('''CREATE TABLE IF NOT EXISTS known_channels (chat_id INTEGER PRIMARY KEY, title TEXT)''')
 conn.commit()
 
@@ -55,15 +57,18 @@ TEXTS = {
     'invalid_format': {'en': '⚠️ Please send a properly formatted MCQ.', 'ar': '⚠️ الرجاء إرسال السؤال بصيغة صحيحة.'}
 }
 
+
 def get_text(key, lang):
     return TEXTS[key].get(lang, TEXTS[key]['en'])
+
 
 def parse_mcq(text, chat_id):
     res = []
     for patt in PATTERNS:
         for m in patt.finditer(text):
             q = m.group('q').strip()
-            h = hash(q)
+            # استخدام hash نص السؤال بشكل sha256
+            h = hashlib.sha256(q.encode('utf-8')).hexdigest()
             cursor.execute('SELECT 1 FROM sent_questions WHERE chat_id=? AND hash=?', (chat_id, h))
             if cursor.fetchone():
                 continue
@@ -93,6 +98,7 @@ def parse_mcq(text, chat_id):
             res.append((q, opts, idx))
     return res
 
+
 async def process_queue(chat_id, context):
     q = send_queues[chat_id]
     while q:
@@ -105,16 +111,20 @@ async def process_queue(chat_id, context):
             await context.bot.send_message(chat_id, get_text('error_poll', 'ar'))
             break
 
+
 async def enqueue_mcq(message, context):
     chat_id = message.chat.id
+    # تسجيل القناة الخاصة إذا كانت جديدة
     if message.chat.type == 'channel':
         title = message.chat.title or 'Private Channel'
         cursor.execute('INSERT OR IGNORE INTO known_channels(chat_id,title) VALUES(?,?)', (chat_id, title))
         conn.commit()
+
     if len(send_queues[chat_id]) > 50:
         lang = (getattr(message.from_user, 'language_code', 'en') or 'en')[:2]
         await context.bot.send_message(chat_id, get_text('queue_full', lang))
         return False
+
     text = message.text or message.caption or ''
     blocks = [b.strip() for b in re.split(r"\n{2,}", text) if b.strip()]
     sent = False
@@ -127,6 +137,7 @@ async def enqueue_mcq(message, context):
         asyncio.create_task(process_queue(chat_id, context))
     return sent
 
+
 async def handle_text(update, context):
     msg = update.message
     if not msg or (not msg.text and not msg.caption):
@@ -134,9 +145,12 @@ async def handle_text(update, context):
     uid = msg.from_user.id
     ct = msg.chat.type
     lang = (getattr(msg.from_user, 'language_code', 'en') or 'en')[:2]
+
+    # منع السبام
     if time.time() - last_sent_time[uid] < 5:
         return
     last_sent_time[uid] = time.time()
+
     if ct == 'private':
         if await enqueue_mcq(msg, context):
             cursor.execute('INSERT OR IGNORE INTO user_stats VALUES (?,0)', (uid,))
@@ -149,13 +163,12 @@ async def handle_text(update, context):
         else:
             await context.bot.send_message(msg.chat.id, get_text('no_q', lang))
         return
+
     botun = (context.bot.username or '').lower()
-    if ct in ['group','supergroup'] and (
-        (msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id) or
-        (botun and f"@{botun}" in (msg.text or msg.caption or '').lower())
-    ):
+    if ct in ['group', 'supergroup'] and ((msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id) or (botun and f"@{botun}" in (msg.text or msg.caption or '').lower())):
         if not await enqueue_mcq(msg, context):
             await context.bot.send_message(msg.chat.id, get_text('invalid_format', lang))
+
 
 async def handle_channel_post(update, context):
     post = update.channel_post
@@ -167,17 +180,14 @@ async def handle_channel_post(update, context):
         cursor.execute('UPDATE channel_stats SET sent=sent+? WHERE chat_id=?', (len(send_queues[cid]), cid))
         conn.commit()
 
-async def channels_command(update, context):
-    async def is_admin(): return True
-    if not await is_admin():
-        await update.message.reply_text("🚫 لا تملك صلاحية.")
-        return
-    rows = cursor.execute('SELECT chat_id,title FROM known_channels').fetchall()
-    if not rows:
-        await update.message.reply_text("لا توجد قنوات مسجلة بعد.")
-        return
-    text = "📡 القنوات المسجلة:\n" + "\n".join([f"- {t}: {cid}" for cid,t in rows])
-    await update.message.reply_text(text, parse_mode='Markdown')
+
+async def channel_id_command(update, context):
+    chat = update.effective_chat
+    if chat.type == 'channel':
+        await update.message.reply_text(f"📡 معرف هذه القناة هو: `{chat.id}`", parse_mode='Markdown')
+    else:
+        await update.message.reply_text("⚠️ هذا الأمر يعمل فقط داخل القنوات.")
+
 
 async def start(update, context):
     lang = (getattr(update.effective_user, 'language_code', 'en') or 'en')[:2]
@@ -189,10 +199,12 @@ async def start(update, context):
     ])
     await update.message.reply_text(get_text('start', lang), reply_markup=kb)
 
+
 async def callback_query_handler(update, context):
     cmd = update.callback_query.data
     uid = update.effective_user.id
     lang = (getattr(update.effective_user, 'language_code', 'en') or 'en')[:2]
+
     if cmd == 'help':
         txt = get_text('help', lang)
     elif cmd == 'new':
@@ -205,10 +217,12 @@ async def callback_query_handler(update, context):
         txt = get_text('stats', lang).format(sent=sent, ch=ch)
     elif cmd == 'channels':
         rows = cursor.execute('SELECT chat_id,title FROM known_channels').fetchall()
-        txt = "لا توجد قنوات" if not rows else "\n".join([f"- {t}: {cid}" for cid,t in rows])
+        txt = "لا توجد قنوات" if not rows else "\n".join([f"- {t}: {cid}" for cid, t in rows])
     else:
         txt = '⚠️ غير مدعوم'
+
     await update.callback_query.edit_message_text(txt, parse_mode='Markdown')
+
 
 async def inline_query(update, context):
     try:
@@ -220,9 +234,11 @@ async def inline_query(update, context):
     except Exception as e:
         logger.error(f"Inline error: {e}")
 
+
 async def help_command(update, context):
     lang = (getattr(update.effective_user, 'language_code', 'en') or 'en')[:2]
     await update.message.reply_text(get_text('help', lang))
+
 
 async def stats_command(update, context):
     uid = update.effective_user.id
@@ -233,6 +249,7 @@ async def stats_command(update, context):
     ch = r[0] if r else 0
     await update.message.reply_text(get_text('stats', lang).format(sent=sent, ch=ch))
 
+
 def main():
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     if not token:
@@ -242,13 +259,14 @@ def main():
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('help', help_command))
     app.add_handler(CommandHandler('stats', stats_command))
-    app.add_handler(CommandHandler('channels', channels_command))
+    app.add_handler(CommandHandler('channel_id', channel_id_command))
     app.add_handler(CallbackQueryHandler(callback_query_handler))
     app.add_handler(InlineQueryHandler(inline_query))
     app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.TEXT, handle_channel_post))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     logger.info('✅ Bot is running...')
     app.run_polling()
+
 
 if __name__ == '__main__':
     main()
