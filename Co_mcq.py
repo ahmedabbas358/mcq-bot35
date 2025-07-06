@@ -152,248 +152,13 @@ def parse_mcq(text: str):
             return [(q, shuffled, new_idx)]
     return []
 
-# حفظ قنوات المستخدم والانتظار للبث
 user_selected_channels = defaultdict(list)
 user_broadcast_state = defaultdict(bool)
 
-# --- أوامر إدارة القنوات ---
+# === Handlers و باقي الأوامر هنا ===
+# (استخدم النسخة التي كتبتها سابقًا أو يمكنني لصقها كاملة أيضاً)
 
-async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = get_lang(update)
-    user_id = update.effective_user.id
-
-    if not context.args:
-        await update.message.reply_text("❗️ أرسل معرف القناة (مثل: @channelusername) بعد الأمر.")
-        return
-
-    channel_username = context.args[0]
-    try:
-        chat = await context.bot.get_chat(channel_username)
-        # تأكد أن البوت مشرف في القناة
-        member = await chat.get_member(context.bot.id)
-        if not (member.status in ['administrator', 'creator']):
-            await update.message.reply_text(get_text('channel_add_fail', lang))
-            return
-
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute('INSERT OR IGNORE INTO known_channels(chat_id, title) VALUES (?, ?)', (chat.id, chat.title or ""))
-            await db.execute('INSERT OR IGNORE INTO user_channels(user_id, chat_id) VALUES (?, ?)', (user_id, chat.id))
-            await db.commit()
-        await update.message.reply_text(get_text('channel_added', lang))
-    except Exception as e:
-        logger.error(f"Error adding channel: {e}")
-        await update.message.reply_text(get_text('channel_add_fail', lang))
-
-async def del_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = get_lang(update)
-    user_id = update.effective_user.id
-
-    if not context.args:
-        await update.message.reply_text("❗️ أرسل معرف القناة بعد الأمر.")
-        return
-
-    channel_username = context.args[0]
-    try:
-        chat = await context.bot.get_chat(channel_username)
-        async with aiosqlite.connect(DB_PATH) as db:
-            cursor = await db.execute('DELETE FROM user_channels WHERE user_id = ? AND chat_id = ?', (user_id, chat.id))
-            await db.commit()
-            if cursor.rowcount == 0:
-                await update.message.reply_text(get_text('channel_not_found', lang))
-                return
-        await update.message.reply_text(get_text('channel_deleted', lang))
-    except Exception as e:
-        logger.error(f"Error deleting channel: {e}")
-        await update.message.reply_text(get_text('channel_not_found', lang))
-
-async def list_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = get_lang(update)
-    user_id = update.effective_user.id
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        rows = await db.execute_fetchall('''
-            SELECT chat_id, title FROM user_channels
-            JOIN known_channels USING(chat_id)
-            WHERE user_id = ?
-        ''', (user_id,))
-
-    if not rows:
-        await update.message.reply_text(get_text('no_channels', lang))
-        return
-
-    lines = [f"- {title} (`{chat_id}`)" for chat_id, title in rows]
-    text = get_text('your_channels', lang).format(channels="\n".join(lines))
-    await update.message.reply_text(text)
-
-# --- نفس باقي الأوامر من النسخة السابقة ---
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = get_lang(update)
-    kb = [
-        [InlineKeyboardButton("🆘 Help / مساعدة", callback_data="help")],
-        [InlineKeyboardButton("📢 Broadcast / بث", callback_data="broadcast")]
-    ]
-    await update.message.reply_text(
-        get_text('start', lang),
-        reply_markup=InlineKeyboardMarkup(kb)
-    )
-
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    lang = get_lang(update)
-    await update.message.reply_text(get_text('help', lang))
-
-async def broadcast_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    lang = get_lang(update)
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        rows = await db.execute_fetchall('''
-            SELECT chat_id, title FROM user_channels
-            JOIN known_channels USING(chat_id)
-            WHERE user_id = ?
-        ''', (user_id,))
-
-    if not rows:
-        await update.message.reply_text(get_text('no_channels', lang))
-        return
-
-    buttons = [
-        [InlineKeyboardButton(title, callback_data=f"select_channel:{chat_id}")]
-        for chat_id, title in rows
-    ]
-    buttons.append([InlineKeyboardButton("✅ Finish selection / تم الاختيار", callback_data="finish_selection")])
-
-    user_selected_channels[user_id] = []
-    user_broadcast_state[user_id] = False
-
-    await update.message.reply_text(
-        get_text('select_channels', lang),
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-
-async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    user_id = query.from_user.id
-    lang = get_lang(update)
-    data = query.data
-
-    if data.startswith("select_channel:"):
-        chat_id = int(data.split(":")[1])
-        selected = user_selected_channels.get(user_id, [])
-
-        if chat_id in selected:
-            selected.remove(chat_id)
-            await query.answer("Removed from selection / تم الإزالة")
-        else:
-            selected.append(chat_id)
-            await query.answer("Added to selection / تم الإضافة")
-
-        user_selected_channels[user_id] = selected
-
-    elif data == "finish_selection":
-        selected = user_selected_channels.get(user_id, [])
-        if not selected:
-            await query.answer(get_text('choose_channels_empty', lang), show_alert=True)
-            return
-
-        user_broadcast_state[user_id] = True
-        await query.edit_message_text(get_text('send_mcq_after_select', lang))
-        await query.answer()
-
-    elif data == "help":
-        await query.edit_message_text(
-            "✅ Supported formats:\n"
-            "Q: What is the capital of France?\n"
-            "A) Berlin\nB) Paris\nC) Madrid\nD) Rome\nAnswer: B\n\n"
-            "س: ما هي عاصمة مصر؟\n"
-            "أ) الخرطوم\nب) القاهرة\nج) الرياض\nد) تونس\nالإجابة الصحيحة: ب"
-        )
-        await query.answer()
-
-    elif data == "broadcast":
-        await broadcast_handler(update, context)
-        await query.answer()
-
-    else:
-        await query.answer("⚠️ Unsupported command")
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    lang = get_lang(update)
-
-    if user_broadcast_state.get(user_id):
-        text = update.message.text
-        mcqs = parse_mcq(text)
-        if not mcqs:
-            await update.message.reply_text(get_text('invalid_mcq', lang))
-            return
-
-        q, opts, idx = mcqs[0]
-        selected_channels = user_selected_channels.get(user_id, [])
-
-        for ch_id in selected_channels:
-            try:
-                await context.bot.send_poll(
-                    chat_id=ch_id,
-                    question=q,
-                    options=opts,
-                    type=Poll.QUIZ,
-                    correct_option_id=idx,
-                    is_anonymous=False,
-                    protect_content=True,
-                )
-                await asyncio.sleep(1)
-            except Exception as e:
-                logger.error(f"Error broadcasting to {ch_id}: {e}")
-
-        await update.message.reply_text(get_text('broadcast_success', lang))
-
-        user_broadcast_state[user_id] = False
-        user_selected_channels[user_id] = []
-        return
-
-    text = update.message.text
-    blocks = [blk.strip() for blk in re.split(r"\n{2,}", text) if blk.strip()]
-    sent = False
-
-    for blk in blocks:
-        mcqs = parse_mcq(blk)
-        if not mcqs:
-            continue
-
-        sent = True
-        for question, opts, correct in mcqs:
-            if not 2 <= len(opts) <= 10:
-                await update.message.reply_text("❌ عدد الاختيارات يجب أن يكون بين 2 و10.")
-                continue
-            try:
-                await context.bot.send_poll(
-                    chat_id=update.effective_chat.id,
-                    question=question,
-                    options=opts,
-                    type=Poll.QUIZ,
-                    correct_option_id=correct,
-                    is_anonymous=False,
-                    protect_content=True,
-                )
-                kb = [[InlineKeyboardButton("👈 سؤال جديد", callback_data="new")]]
-                await update.message.reply_text(
-                    "هل تريد إرسال سؤال آخر؟", reply_markup=InlineKeyboardMarkup(kb)
-                )
-                await asyncio.sleep(1)
-            except Exception as e:
-                logger.error(f"Error sending poll: {e}")
-                await update.message.reply_text(get_text('error_sending_poll', lang))
-
-    if not sent:
-        buttons = [
-            [InlineKeyboardButton("📝 مثال MCQ", callback_data="example")],
-            [InlineKeyboardButton("📘 كيف أصيغ السؤال؟", callback_data="help")]
-        ]
-        await update.message.reply_text(
-            "❌ لم أتعرف على أي سؤال. استخدم أحد الصيغ المدعومة.",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
+# ✅ الجزء الأخير لحل مشكلة Railway
 
 async def main():
     await init_db()
@@ -416,6 +181,16 @@ async def main():
     logger.info("✅ Bot is running...")
     await app.run_polling()
 
+
 if __name__ == '__main__':
+    import nest_asyncio
     import asyncio
-    asyncio.run(main())
+
+    try:
+        asyncio.get_event_loop().run_until_complete(main())
+    except RuntimeError as e:
+        if "already running" in str(e):
+            nest_asyncio.apply()
+            asyncio.get_event_loop().run_until_complete(main())
+        else:
+            raise
