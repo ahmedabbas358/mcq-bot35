@@ -9,8 +9,7 @@ import gc
 from asyncio import Lock
 
 import aiosqlite
-from telegram import Update, Poll, InlineKeyboardButton, InlineKeyboard Markup, InlineQueryResultArticle, InputTextMessageContent
-from telegram.constants import PollType
+from telegram import Update, Poll, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContentfrom telegram.constants import PollType
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, InlineQueryHandler, filters, ContextTypes
