@@ -1,8 +1,7 @@
-# co_mcq_bot.py - النسخة المحسنة مع التعديلات المقترحة
+# co_mcq_bot.py - النسخة النهائية المحسنة بالكامل
 import os
 import re
 import logging
-import random
 import asyncio
 import sqlite3
 import time
@@ -16,197 +15,205 @@ from telegram.ext import (
     InlineQueryHandler, filters, ContextTypes
 )
 
-# إعداد سجل الأحداث
+# إعداد السجل
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# اتصال بقاعدة بيانات SQLite للإحصائيات والأسئلة المرسلة
+# قاعدة البيانات
 conn = sqlite3.connect('stats.db', check_same_thread=False)
 cursor = conn.cursor()
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS user_stats (
-    user_id INTEGER PRIMARY KEY,
-    sent INTEGER DEFAULT 0
-)''')
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS channel_stats (
-    chat_id INTEGER PRIMARY KEY,
-    sent INTEGER DEFAULT 0
-)''')
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS sent_questions (
-    chat_id INTEGER,
-    hash INTEGER,
-    PRIMARY KEY(chat_id, hash)
-)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS user_stats (user_id INTEGER PRIMARY KEY, sent INTEGER DEFAULT 0)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS channel_stats (chat_id INTEGER PRIMARY KEY, sent INTEGER DEFAULT 0)''')
+cursor.execute('''CREATE TABLE IF NOT EXISTS sent_questions (chat_id INTEGER, hash INTEGER, PRIMARY KEY(chat_id, hash))''')
 conn.commit()
 
-# ذاكرة قائمة الانتظار وتنظيم الإرسال
-send_queues = defaultdict(lambda: deque())
+# إعداد الذاكرة
+send_queues = defaultdict(deque)
 last_sent_time = defaultdict(float)
 
-# إعداد ثابتات
+# تحويل الحروف والأرقام
 ARABIC_DIGITS = {'١': '1', '٢': '2', '٣': '3', '٤': '4'}
 AR_LETTERS = {'أ': 0, 'ب': 1, 'ج': 2, 'د': 3}
+
 PATTERNS = [
     re.compile(r"Q[.:)]?\s*(?P<q>.+?)\s*(?P<opts>(?:[A-D][).:]\s*.+?\s*){2,10})"
                r"(?:Answer|Ans|Correct Answer)[:：]?\s*(?P<ans>[A-Da-d1-4١-٤])",
-               re.S|re.IGNORECASE),
+               re.S | re.IGNORECASE),
     re.compile(r"س[.:)]?\s*(?P<q>.+?)\s*(?P<opts>(?:[أ-د][).:]\s*.+?\s*){2,10})"
                r"الإجابة\s+الصحيحة[:：]?\s*(?P<ans>[أ-د1-4١-٤])",
                re.S),
     re.compile(r"(?P<q>.+?)\n(?P<opts>(?:\s*[A-Za-zء-ي0-9]+[).:]\s*.+?\n){2,10})"
                r"(?:Answer|الإجابة|Ans|Correct Answer)[:：]?\s*(?P<ans>[A-Za-zء-ي0-9١-٤])",
-               re.S|re.IGNORECASE),
+               re.S | re.IGNORECASE),
 ]
 
-# نصوص متعددة اللغات
 TEXTS = {
-    'start': {'en':'🤖 Hi! Choose an option:','ar':'🤖 أهلاً! اختر من القائمة:'},
-    'help': {'en':'Usage:\n- Send MCQ in private.\n- Mention me or reply.\n-Q:/س: formats','ar':'🆘 كيفية الاستخدام:\n- في الخاص أرسل السؤال.\n- في المجموعات @bot أو الرد.\n- الصيغ: Q:/س:'},
-    'new': {'en':'📩 Send your MCQ now!','ar':'📩 أرسل سؤال MCQ الآن!'},
-    'stats':{'en':'📊 You sent {sent} questions.✉️ Channel posts: {ch}','ar':'📊 أرسلت {sent} سؤالاً.🏷️ منشورات القناة: {ch}'},
-    'queue_full':{'en':'🚫 Queue full, send fewer questions.','ar':'🚫 القائمة ممتلئة، أرسل أقل.'},
-    'no_q': {'en':'❌ No questions detected.','ar':'❌ لم أتعرف على أي سؤال.'},
-    'error_poll':{'en':'⚠️ Failed to send question.','ar':'⚠️ فشل في إرسال السؤال.'}
+    'start': {'en': '🤖 Hi! Choose an option:', 'ar': '🤖 أهلاً! اختر من القائمة:'},
+    'help': {
+        'en': 'Usage:\n- Send MCQ in private.\n- Mention me or reply.\n- Formats: Q:/س:',
+        'ar': '🆘 كيفية الاستخدام:\n- في الخاص أرسل السؤال.\n- في المجموعات اذكر @البوت أو الرد.\n- الصيغ: Q:/س:'
+    },
+    'new': {'en': '📩 Send your MCQ now!', 'ar': '📩 أرسل سؤال MCQ الآن!'},
+    'stats': {
+        'en': '📊 You sent {sent} questions.\n✉️ Channel posts: {ch}',
+        'ar': '📊 أرسلت {sent} سؤالاً.\n🏷️ منشورات القناة: {ch}'
+    },
+    'queue_full': {'en': '🚫 Queue full, send fewer questions.', 'ar': '🚫 القائمة ممتلئة، أرسل أقل.'},
+    'no_q': {'en': '❌ No questions detected.', 'ar': '❌ لم أتعرف على أي سؤال.'},
+    'error_poll': {'en': '⚠️ Failed to send question.', 'ar': '⚠️ فشل في إرسال السؤال.'}
 }
 
 def get_text(key, lang):
-    return TEXTS[key].get(lang,'')
+    return TEXTS[key].get(lang, TEXTS[key]['en'])
 
-# تحليل MCQ
 def parse_mcq(text, chat_id):
-    res=[]
+    res = []
     for patt in PATTERNS:
         for m in patt.finditer(text):
-            q=m.group('q').strip()
-            h=hash(q)
-            cursor.execute('SELECT 1 FROM sent_questions WHERE chat_id=? AND hash=?',(chat_id,h))
+            q = m.group('q').strip()
+            h = hash(q)
+            cursor.execute('SELECT 1 FROM sent_questions WHERE chat_id=? AND hash=?', (chat_id, h))
             if cursor.fetchone():
                 continue
-            # سجل السؤال
-            cursor.execute('INSERT INTO sent_questions(chat_id,hash) VALUES(?,?)',(chat_id,h))
+            cursor.execute('INSERT INTO sent_questions(chat_id, hash) VALUES (?, ?)', (chat_id, h))
             conn.commit()
-            lines=m.group('opts').strip().splitlines()
-            opts=[re.split(r'^[A-Za-zء-ي١-٩0-9][).:]\s*',ln.strip(),1)[1]
-                  for ln in lines if len(re.split(r'^[A-Za-zء-ي١-٩0-9][).:]\s*',ln.strip(),1))>1]
-            if not 2<=len(opts)<=10:
+            lines = m.group('opts').strip().splitlines()
+            opts = [re.split(r'^[A-Za-zء-ي١-٩0-9][).:]\s*', ln.strip(), 1)[1]
+                    for ln in lines if len(re.split(r'^[A-Za-zء-ي١-٩0-9][).:]\s*', ln.strip(), 1)) > 1]
+            if not 2 <= len(opts) <= 10:
                 continue
-            raw=m.group('ans').strip();ans=ARABIC_DIGITS.get(raw,raw)
+            raw = m.group('ans').strip()
+            ans = ARABIC_DIGITS.get(raw, raw)
             try:
-                idx=int(ans)-1 if ans.isdigit() else ord(ans.lower())-ord('a') if ans.lower() in 'abcd' else AR_LETTERS.get(raw)
+                idx = int(ans) - 1 if ans.isdigit() else ord(ans.lower()) - ord('a') if ans.lower() in 'abcd' else AR_LETTERS.get(raw)
             except:
                 continue
-            if idx is None or not 0<=idx<len(opts): continue
-            res.append((q,opts,idx))
+            if idx is None or not 0 <= idx < len(opts): continue
+            res.append((q, opts, idx))
     return res
 
-# إرسال قائمة الانتظار
-async def process_queue(chat_id,context):
-    q=send_queues[chat_id]
+async def process_queue(chat_id, context):
+    q = send_queues[chat_id]
     while q:
-        qst,opts,idx=q.popleft()
+        qst, opts, idx = q.popleft()
         try:
             await context.bot.send_poll(chat_id, qst, opts, type=Poll.QUIZ, correct_option_id=idx, is_anonymous=False)
             await asyncio.sleep(0.5)
         except:
             break
 
-async def enqueue_mcq(message,context):
-    chat_id=message.chat.id
-    if len(send_queues[chat_id])>50:
-        lang=(message.from_user.language_code or 'en')[:2]
-        await context.bot.send_message(chat_id, get_text('queue_full',lang))
+async def enqueue_mcq(message, context):
+    chat_id = message.chat.id
+    if len(send_queues[chat_id]) > 50:
+        lang = (message.from_user.language_code or 'en')[:2]
+        await context.bot.send_message(chat_id, get_text('queue_full', lang))
         return False
-    text=message.text or message.caption or ''
-    blocks=[b.strip() for b in re.split(r"\n{2,}",text) if b.strip()]
-    sent=False
+    text = message.text or message.caption or ''
+    blocks = [b.strip() for b in re.split(r"\n{2,}", text) if b.strip()]
+    sent = False
     for blk in blocks:
-        lst=parse_mcq(blk,chat_id)
+        lst = parse_mcq(blk, chat_id)
         for item in lst:
-            send_queues[chat_id].append(item);sent=True
+            send_queues[chat_id].append(item)
+            sent = True
     if sent:
-        asyncio.create_task(process_queue(chat_id,context))
+        asyncio.create_task(process_queue(chat_id, context))
     return sent
 
-async def handle_text(update,context):
-    msg=update.message
+async def handle_text(update, context):
+    msg = update.message
     if not msg or (not msg.text and not msg.caption): return
-    uid=msg.from_user.id; ct=msg.chat.type; lang=(msg.from_user.language_code or 'en')[:2]
-    if time.time()-last_sent_time[uid]<5: return
-    last_sent_time[uid]=time.time()
-    if ct=='private':
-        if await enqueue_mcq(msg,context):
-            cursor.execute('INSERT OR IGNORE INTO user_stats VALUES(?,0)',(uid,))
-            cursor.execute('UPDATE user_stats SET sent=sent+? WHERE user_id=?',(len(send_queues[msg.chat.id]),uid))
-            conn.commit();
+    uid = msg.from_user.id
+    ct = msg.chat.type
+    lang = (msg.from_user.language_code or 'en')[:2]
+    if time.time() - last_sent_time[uid] < 5: return
+    last_sent_time[uid] = time.time()
+    if ct == 'private':
+        if await enqueue_mcq(msg, context):
+            cursor.execute('INSERT OR IGNORE INTO user_stats VALUES (?, 0)', (uid,))
+            cursor.execute('UPDATE user_stats SET sent=sent+? WHERE user_id=?', (len(send_queues[msg.chat.id]), uid))
+            conn.commit()
             try: await msg.delete()
             except: pass
     else:
-        botun=context.bot.username.lower() if context.bot.username else ''
-        if ct in ['group','supergroup'] and ((msg.reply_to_message and msg.reply_to_message.from_user.id==context.bot.id)
+        botun = context.bot.username.lower() if context.bot.username else ''
+        if ct in ['group', 'supergroup'] and ((msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id)
             or (botun and f"@{botun}" in (msg.text or msg.caption).lower())):
-            await enqueue_mcq(msg,context)
+            await enqueue_mcq(msg, context)
 
-async def handle_channel_post(update,context):
-    post=update.channel_post
-    if post and await enqueue_mcq(post,context):
-        cid=post.chat.id
-        cursor.execute('INSERT OR IGNORE INTO channel_stats VALUES(?,0)',(cid,))
-        cursor.execute('UPDATE channel_stats SET sent=sent+? WHERE chat_id=?',(len(send_queues[cid]),cid))
+async def handle_channel_post(update, context):
+    post = update.channel_post
+    if post and await enqueue_mcq(post, context):
+        cid = post.chat.id
+        cursor.execute('INSERT OR IGNORE INTO channel_stats VALUES (?, 0)', (cid,))
+        cursor.execute('UPDATE channel_stats SET sent=sent+? WHERE chat_id=?', (len(send_queues[cid]), cid))
         conn.commit()
 
-async def start(update,context):
-    lang=(update.effective_user.language_code or 'en')[:2]
-    kb=InlineKeyboardMarkup([
-        [InlineKeyboardButton('📝 سؤال جديد','new')],[InlineKeyboardButton('📊 إحصائياتي','stats')],
-        [InlineKeyboardButton('📘 المساعدة','help')]
+async def start(update, context):
+    lang = (update.effective_user.language_code or 'en')[:2]
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton('📝 سؤال جديد', callback_data='new')],
+        [InlineKeyboardButton('📊 إحصائياتي', callback_data='stats')],
+        [InlineKeyboardButton('📘 المساعدة', callback_data='help')]
     ])
-    await update.message.reply_text(get_text('start',lang),reply_markup=kb)
+    await update.message.reply_text(get_text('start', lang), reply_markup=kb)
 
-async def callback_query_handler(update,context):
-    cmd=update.callback_query.data;uid=update.effective_user.id;lang=(update.effective_user.language_code or 'en')[:2]
-    if cmd=='help': txt=get_text('help',lang)
-    elif cmd=='new': txt=get_text('new',lang)
-    elif cmd=='stats':
-        cursor.execute('SELECT sent FROM user_stats WHERE user_id=?',(uid,));r=cursor.fetchone();sent=r[0] if r else 0
-        cursor.execute('SELECT sent FROM channel_stats WHERE chat_id=?',(update.effective_chat.id,));r=cursor.fetchone();ch=r[0] if r else 0
-        txt=get_text('stats',lang).format(sent=sent,ch=ch)
-    else: txt='⚠️ غير مدعوم'
+async def callback_query_handler(update, context):
+    cmd = update.callback_query.data
+    uid = update.effective_user.id
+    lang = (update.effective_user.language_code or 'en')[:2]
+    if cmd == 'help': txt = get_text('help', lang)
+    elif cmd == 'new': txt = get_text('new', lang)
+    elif cmd == 'stats':
+        cursor.execute('SELECT sent FROM user_stats WHERE user_id=?', (uid,))
+        r = cursor.fetchone(); sent = r[0] if r else 0
+        cursor.execute('SELECT sent FROM channel_stats WHERE chat_id=?', (update.effective_chat.id,))
+        r = cursor.fetchone(); ch = r[0] if r else 0
+        txt = get_text('stats', lang).format(sent=sent, ch=ch)
+    else:
+        txt = '⚠️ غير مدعوم'
     await update.callback_query.edit_message_text(txt)
 
-async def inline_query(update,context):
+async def inline_query(update, context):
     try:
-        q=update.inline_query.query
+        q = update.inline_query.query
         if not q: return
-        res=[InlineQueryResultArticle(id='1',title='تحويل سؤال MCQ',input_message_content=InputTextMessageContent(q))]
+        res = [InlineQueryResultArticle(id='1', title='تحويل سؤال MCQ', input_message_content=InputTextMessageContent(q))]
         await update.inline_query.answer(res)
     except Exception as e:
         logger.error(f"Inline error: {e}")
 
-async def help_command(update,context):
-    lang=(update.effective_user.language_code or 'en')[:2]
-    await update.message.reply_text(get_text('help',lang))
+async def help_command(update, context):
+    lang = (update.effective_user.language_code or 'en')[:2]
+    await update.message.reply_text(get_text('help', lang))
 
-async def stats_command(update,context):
-    uid=update.effective_user.id;lang=(update.effective_user.language_code or 'en')[:2]
-    cursor.execute('SELECT sent FROM user_stats WHERE user_id=?',(uid,));r=cursor.fetchone();sent=r[0] if r else 0
-    cursor.execute('SELECT sent FROM channel_stats WHERE chat_id=?',(update.effective_chat.id,));r=cursor.fetchone();ch=r[0] if r else 0
-    await update.message.reply_text(get_text('stats',lang).format(sent=sent,ch=ch))
-
+async def stats_command(update, context):
+    uid = update.effective_user.id
+    lang = (update.effective_user.language_code or 'en')[:2]
+    cursor.execute('SELECT sent FROM user_stats WHERE user_id=?', (uid,))
+    r = cursor.fetchone(); sent = r[0] if r else 0
+    cursor.execute('SELECT sent FROM channel_stats WHERE chat_id=?', (update.effective_chat.id,))
+    r = cursor.fetchone(); ch = r[0] if r else 0
+    await update.message.reply_text(get_text('stats', lang).format(sent=sent, ch=ch))
 
 def main():
-    token=os.getenv('TELEGRAM_BOT_TOKEN')
-    if not token: logger.error('❌ TELEGRAM_BOT_TOKEN missing');return
-    app=Application.builder().token(token).build()
-    app.add_handler(CommandHandler('start',start));app.add_handler(CommandHandler('help',help_command))
-    app.add_handler(CommandHandler('stats',stats_command));app.add_handler(CallbackQueryHandler(callback_query_handler))
-    app.add_handler(InlineQueryHandler(inline_query));app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.TEXT,handle_channel_post))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,handle_text))
-    logger.info('✅ Bot is running...');app.run_polling()
+    token = os.getenv('TELEGRAM_BOT_TOKEN')
+    if not token:
+        logger.error('❌ TELEGRAM_BOT_TOKEN missing')
+        return
+    app = Application.builder().token(token).build()
+    app.add_handler(CommandHandler('start', start))
+    app.add_handler(CommandHandler('help', help_command))
+    app.add_handler(CommandHandler('stats', stats_command))
+    app.add_handler(CallbackQueryHandler(callback_query_handler))
+    app.add_handler(InlineQueryHandler(inline_query))
+    app.add_handler(MessageHandler(filters.ChatType.CHANNEL & filters.TEXT, handle_channel_post))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    logger.info('✅ Bot is running...')
+    app.run_polling()
 
-if __name__=='__main__':main()
-
+if __name__ == '__main__':
+    main()
