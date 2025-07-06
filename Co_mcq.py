@@ -10,10 +10,10 @@ from asyncio import Lock
 
 import aiosqlite
 from telegram import Update, Poll, InlineKeyboardButton, InlineKeyboardMarkup, InlineQueryResultArticle, InputTextMessageContent
-from telegram.constants import PollType  # استيراد PollType من telegram.constants
+from telegram.constants import PollType
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
-    CallbackQueryHandler, InlineQueryHandler, Filters, ContextTypes
+    CallbackQueryHandler, InlineQueryHandler, filters, ContextTypes
 )
 
 # إعداد التسجيل
@@ -29,7 +29,7 @@ last_sent_time = defaultdict(float)
 retry_counts = defaultdict(int)
 MAX_RETRIES = 3
 MAX_QUESTIONS_PER_POST = 3
-RATE_LIMIT_DELAY = 2.0  # زيادة الفاصل الزمني لتجنب الحظر
+RATE_LIMIT_DELAY = 2.0
 
 # تعيين الأرقام والحروف العربية
 ARABIC_DIGITS = {'١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9', '٠': '0'}
@@ -201,7 +201,7 @@ async def process_queue(chat_id, context):
                 lang = detect_language(qst)
                 await context.bot.send_message(chat_id, get_text('error_poll', lang))
         finally:
-            gc.collect()  # تنظيف الذاكرة بعد كل سؤال
+            gc.collect()
     if retry_queue:
         send_queues[chat_id].extend(retry_queue)
 
@@ -370,8 +370,10 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         try:
             await post.delete()
         except Exception as e:
-            if hasattr(e, 'error_code') and e.error_code not in (400, 403):
-                logger.warning(f"فشل الحذف: {e}")
+            if hasattr(e, 'error_code') and e.error_code in (400, 403):
+                logger.warning(f"فشل الحذف بسبب نقص الصلاحيات: {e}")
+            else:
+                logger.error(f"فشل الحذف: {e}")
 
 # الأوامر
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -618,8 +620,8 @@ async def main():
     app.add_handler(CommandHandler('top_users', top_users_command))
     app.add_handler(CallbackQueryHandler(callback_query_handler))
     app.add_handler(InlineQueryHandler(inline_query))
-    app.add_handler(MessageHandler(Filters.chat_type.channel & (Filters.text | Filters.caption), handle_channel_post))
-    app.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text))
+    app.add_handler(MessageHandler(filters.ChatType.CHANNEL & (filters.TEXT | filters.CAPTION), handle_channel_post))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     # تشغيل البوت
     try:
