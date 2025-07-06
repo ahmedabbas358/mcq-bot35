@@ -21,7 +21,6 @@ conn = sqlite3.connect('stats.db', check_same_thread=False)
 cursor = conn.cursor()
 cursor.execute('''CREATE TABLE IF NOT EXISTS user_stats (user_id INTEGER PRIMARY KEY, sent INTEGER DEFAULT 0)''')
 cursor.execute('''CREATE TABLE IF NOT EXISTS channel_stats (chat_id INTEGER PRIMARY KEY, sent INTEGER DEFAULT 0)''')
-cursor.execute('''CREATE TABLE IF NOT EXISTS sent_questions (chat_id INTEGER, hash INTEGER, PRIMARY KEY(chat_id, hash))''')
 cursor.execute('''CREATE TABLE IF NOT EXISTS known_channels (chat_id INTEGER PRIMARY KEY, title TEXT)''')
 conn.commit()
 
@@ -87,7 +86,7 @@ async def enqueue_mcq(message, context):
         cursor.execute('INSERT OR IGNORE INTO known_channels(chat_id,title) VALUES(?,?)', (chat_id, title))
         conn.commit()
     if len(send_queues[chat_id]) > 50:
-        lang = (getattr(message.from_user, 'language_code', 'en') if message.from_user else 'en')[:2]
+        lang = (getattr(message.from_user, 'language_code', 'en') or 'en')[:2]
         await context.bot.send_message(chat_id, get_text('queue_full', lang))
         return False
     text = message.text or message.caption or ''
@@ -109,27 +108,28 @@ async def handle_text(update, context):
     uid = msg.from_user.id
     ct = msg.chat.type
     lang = (getattr(msg.from_user, 'language_code', 'en') or 'en')[:2]
-    botun = (context.bot.username or '').lower()
-
-    if ct in ['group', 'supergroup']:
-        if not ((msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id) or
-                (botun and f"@{botun}" in (msg.text or msg.caption or '').lower())):
-            return
-
-    if ct == 'private' and time.time() - last_sent_time[uid] < 5:
+    if time.time() - last_sent_time[uid] < 5:
         return
     last_sent_time[uid] = time.time()
-
-    if await enqueue_mcq(msg, context):
-        cursor.execute('INSERT OR IGNORE INTO user_stats VALUES (?,0)', (uid,))
-        cursor.execute('UPDATE user_stats SET sent=sent+? WHERE user_id=?', (len(send_queues[msg.chat.id]), uid))
-        conn.commit()
-        try:
-            await msg.delete()
-        except:
-            pass
-    else:
-        await context.bot.send_message(msg.chat.id, get_text('no_q', lang))
+    if ct == 'private':
+        if await enqueue_mcq(msg, context):
+            cursor.execute('INSERT OR IGNORE INTO user_stats VALUES (?,0)', (uid,))
+            cursor.execute('UPDATE user_stats SET sent=sent+? WHERE user_id=?', (len(send_queues[msg.chat.id]), uid))
+            conn.commit()
+            try:
+                await msg.delete()
+            except:
+                pass
+        else:
+            await context.bot.send_message(msg.chat.id, get_text('no_q', lang))
+        return
+    botun = (context.bot.username or '').lower()
+    if ct in ['group','supergroup'] and (
+        (msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id) or
+        (botun and f"@{botun}" in (msg.text or msg.caption or '').lower())
+    ):
+        if not await enqueue_mcq(msg, context):
+            await context.bot.send_message(msg.chat.id, get_text('invalid_format', lang))
 
 async def handle_channel_post(update, context):
     post = update.channel_post
@@ -143,18 +143,44 @@ async def handle_channel_post(update, context):
 
     chat_id = post.chat.id
     title = post.chat.title or 'Private Channel'
+
     cursor.execute('INSERT OR IGNORE INTO known_channels(chat_id, title) VALUES(?, ?)', (chat_id, title))
     conn.commit()
 
-    if await enqueue_mcq(post, context):
+    blocks = [b.strip() for b in re.split(r"\n{2,}", text) if b.strip()]
+    total_sent = 0
+
+    for blk in blocks:
+        lst = parse_mcq(blk, chat_id)
+        for q, opts, idx in lst:
+            try:
+                await context.bot.send_poll(
+                    chat_id=chat_id,
+                    question=q,
+                    options=opts,
+                    type=Poll.QUIZ,
+                    correct_option_id=idx,
+                    is_anonymous=False
+                )
+                await asyncio.sleep(0.5)
+                total_sent += 1
+            except Exception as e:
+                logger.warning(f"❌ فشل في إرسال استبيان إلى القناة {chat_id}: {e}")
+
+    if total_sent > 0:
         cursor.execute('INSERT OR IGNORE INTO channel_stats VALUES(?,0)', (chat_id,))
-        cursor.execute('UPDATE channel_stats SET sent=sent+? WHERE chat_id=?', (len(send_queues[chat_id]), chat_id))
+        cursor.execute('UPDATE channel_stats SET sent=sent+? WHERE chat_id=?', (total_sent, chat_id))
         conn.commit()
-    else:
-        try:
-            await context.bot.send_message(chat_id, get_text('invalid_format', 'ar'))
-        except Exception as e:
-            logger.warning(f"Can't send error msg to channel: {e}")
+
+async def start(update, context):
+    lang = (getattr(update.effective_user, 'language_code', 'en') or 'en')[:2]
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton('📝 سؤال جديد', callback_data='new')],
+        [InlineKeyboardButton('📊 إحصائياتي', callback_data='stats')],
+        [InlineKeyboardButton('📘 المساعدة', callback_data='help')],
+        [InlineKeyboardButton('📺 القنوات', callback_data='channels')]
+    ])
+    await update.message.reply_text(get_text('start', lang), reply_markup=kb)
 
 async def callback_query_handler(update, context):
     cmd = update.callback_query.data
@@ -177,15 +203,15 @@ async def callback_query_handler(update, context):
         txt = '⚠️ غير مدعوم'
     await update.callback_query.edit_message_text(txt, parse_mode='Markdown')
 
-async def start(update, context):
-    lang = (getattr(update.effective_user, 'language_code', 'en') or 'en')[:2]
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton('📝 سؤال جديد', callback_data='new')],
-        [InlineKeyboardButton('📊 إحصائياتي', callback_data='stats')],
-        [InlineKeyboardButton('📘 المساعدة', callback_data='help')],
-        [InlineKeyboardButton('📺 القنوات', callback_data='channels')]
-    ])
-    await update.message.reply_text(get_text('start', lang), reply_markup=kb)
+async def inline_query(update, context):
+    try:
+        q = update.inline_query.query
+        if not q:
+            return
+        results = [InlineQueryResultArticle(id='1', title='تحويل سؤال MCQ', input_message_content=InputTextMessageContent(q))]
+        await update.inline_query.answer(results)
+    except Exception as e:
+        logger.error(f"Inline error: {e}")
 
 async def help_command(update, context):
     lang = (getattr(update.effective_user, 'language_code', 'en') or 'en')[:2]
@@ -200,25 +226,18 @@ async def stats_command(update, context):
     ch = r[0] if r else 0
     await update.message.reply_text(get_text('stats', lang).format(sent=sent, ch=ch))
 
-async def inline_query(update, context):
-    try:
-        q = update.inline_query.query
-        if not q:
-            return
-        results = [InlineQueryResultArticle(id='1', title='تحويل سؤال MCQ', input_message_content=InputTextMessageContent(q))]
-        await update.inline_query.answer(results)
-    except Exception as e:
-        logger.error(f"Inline error: {e}")
-
 async def channels_command(update, context):
     rows = cursor.execute('SELECT chat_id,title FROM known_channels').fetchall()
-    text = "📡 القنوات المسجلة:\n" + "\n".join([f"- {t}: {cid}" for cid,t in rows]) if rows else "لا توجد قنوات مسجلة بعد."
+    if not rows:
+        await update.message.reply_text("لا توجد قنوات مسجلة بعد.")
+        return
+    text = "📡 القنوات المسجلة:\n" + "\n".join([f"- {t}: {cid}" for cid,t in rows])
     await update.message.reply_text(text, parse_mode='Markdown')
 
 def main():
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     if not token:
-        raise RuntimeError("No bot token found.")
+        raise RuntimeError("❌ لم يتم تحديد توكن البوت.")
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('help', help_command))
