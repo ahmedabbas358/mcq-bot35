@@ -31,7 +31,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
-logger = logging.getLogger(__name__)  # تصحيح استخدام __name__
+logger = logging.getLogger(__name__)
 
 # تعريف المتغيرات العامة
 DB_PATH = os.getenv("DB_PATH", "stats.db")  # استخدام متغير بيئي للمرونة على Railway
@@ -367,7 +367,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     # تهيئة قاعدة البيانات وجدولة التنظيف
-    async def startup():
+    async def startup(application):  # Fixed: Added 'application' parameter
         conn = await get_db()
         await init_db(conn)
         asyncio.create_task(schedule_cleanup())
