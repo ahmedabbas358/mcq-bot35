@@ -34,7 +34,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # تعريف المتغيرات العامة
-DB_PATH = os.getenv("DB_PATH", "stats.db")  # استخدام متغير بيئي للمرونة على Railway
+DB_PATH = os.getenv("DB_PATH", "stats.db")
 send_queues = defaultdict(deque)
 last_sent_time = defaultdict(float)
 _db_conn: aiosqlite.Connection = None
@@ -69,8 +69,8 @@ PATTERNS = [
 TEXTS = {
     "start": {"en": "🤖 Hi! Choose an option:", "ar": "🤖 أهلاً! اختر من القائمة:"},
     "help": {
-        "en": "🆘 Usage:\n- Send MCQ in private.\n- To publish in a channel: use 🔄 and choose.\n- In groups: reply or mention @bot.\nExample:\nQ: ...\nA) ...\nB) ...\nAnswer: A",
-        "ar": "🆘 كيفية الاستخدام:\n- في الخاص: أرسل السؤال بصيغة Q:/س:.\n- للنشر في قناة: اضغط 🔄 ثم اختر القناة.\n- في المجموعات: رُدّ على البوت أو اذكر @البوت.\nمثال:\nس: ...\nأ) ...\nب) ...\nالإجابة: أ",
+        "en": "🆘 Usage:\n- Send MCQ in private.\n- To publish in a channel: use 🔄 or /setchannel.\n- In groups: reply or mention @bot.\nExample:\nQ: ...\nA) ...\nB) ...\nAnswer: A",
+        "ar": "🆘 كيفية الاستخدام:\n- في الخاص: أرسل السؤال بصيغة Q:/س:.\n- للنشر في قناة: استخدم 🔄 أو /setchannel.\n- في المجموعات: رُدّ على البوت أو اذكر @البوت.\nمثال:\nس: ...\nأ) ...\nب) ...\nالإجابة: أ",
     },
     "new": {"en": "📩 Send your MCQ now!", "ar": "📩 أرسل سؤال MCQ الآن!"},
     "stats": {
@@ -80,13 +80,17 @@ TEXTS = {
     "queue_full": {"en": "🚫 Queue full, send fewer questions.", "ar": "🚫 القائمة ممتلئة، أرسل أقل."},
     "no_q": {"en": "❌ No questions detected.", "ar": "❌ لم يتم العثور على أسئلة."},
     "invalid_format": {"en": "⚠️ Invalid format.", "ar": "⚠️ صيغة غير صحيحة."},
-    "pollbot_link": {"en": "📢 Share vote: {link}", "ar": "📢 شارك التصويت: {link}"},
+    "quiz_sent": {"en": "✅ Quiz sent!", "ar": "✅ تم إرسال الاختبار!"},
+    "share_quiz": {"en": "📢 Share Quiz", "ar": "📢 مشاركة الاختبار"},
+    "repost_quiz": {"en": "🔄 Repost Quiz", "ar": "🔄 إعادة نشر الاختبار"},
     "channels_list": {"en": "📺 Channels:\n{channels}", "ar": "📺 القنوات:\n{channels}"},
     "no_channels": {"en": "❌ No channels found.", "ar": "❌ لا توجد قنوات."},
     "private_channel_warning": {
         "en": "⚠️ Ensure the bot is an admin in the private channel.",
         "ar": "⚠️ تأكد أن البوت مشرف في القناة الخاصة.",
     },
+    "set_channel_success": {"en": "✅ Default channel set: {title}", "ar": "✅ تم تعيين القناة الافتراضية: {title}"},
+    "no_channel_selected": {"en": "❌ No channel selected.", "ar": "❌ لم يتم اختيار قناة."},
 }
 
 def get_text(key, lang, **kwargs):
@@ -110,6 +114,12 @@ async def init_db(conn):
     )
     await conn.execute(
         "CREATE TABLE IF NOT EXISTS known_channels (chat_id INTEGER PRIMARY KEY, title TEXT)"
+    )
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS quizzes (quiz_id TEXT PRIMARY KEY, question TEXT, options TEXT, correct_option INTEGER, user_id INTEGER)"
+    )
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS default_channels (user_id INTEGER PRIMARY KEY, chat_id INTEGER, title TEXT)"
     )
     await conn.commit()
 
@@ -149,13 +159,14 @@ def parse_mcq(text):
             res.append((q, opts, idx))
     return res
 
-async def process_queue(chat_id, context, user_id=None, is_private=False):
+async def process_queue(chat_id, context, user_id=None, is_private=False, quiz_id=None):
     """Process the send queue for a given chat."""
     conn = await get_db()
     while send_queues[chat_id]:
         q, opts, idx = send_queues[chat_id].popleft()
         try:
-            await context.bot.send_poll(
+            # Send the poll
+            poll = await context.bot.send_poll(
                 chat_id,
                 q,
                 opts,
@@ -164,15 +175,36 @@ async def process_queue(chat_id, context, user_id=None, is_private=False):
                 is_anonymous=False,
             )
             await asyncio.sleep(0.5)
+            # Delete the original message if needed
             msg_id = context.user_data.pop("message_to_delete", None)
             if msg_id:
                 try:
                     await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
                 except Exception as e:
                     logger.warning(f"فشل حذف الرسالة: {e}")
-            link = f"https://t.me/PollBot?startgroup={hashlib.md5((q + ':::'.join(opts)).encode()).hexdigest()}"
+            # Generate quiz ID if not provided
+            if not quiz_id:
+                quiz_id = hashlib.md5((q + ':::'.join(opts)).encode()).hexdigest()
+                await conn.execute(
+                    "INSERT OR IGNORE INTO quizzes (quiz_id, question, options, correct_option, user_id) VALUES (?, ?, ?, ?, ?)",
+                    (quiz_id, q, ':::'.join(opts), idx, user_id),
+                )
+                await conn.commit()
+            # Create inline buttons for sharing and reposting
             lang = context.user_data.get("lang", "en")
-            await context.bot.send_message(chat_id, get_text("pollbot_link", lang, link=link))
+            bot_username = (await context.bot.get_me()).username
+            share_link = f"https://t.me/{bot_username}?start=quiz_{quiz_id}"
+            keyboard = [
+                [InlineKeyboardButton(get_text("share_quiz", lang), url=share_link)],
+                [InlineKeyboardButton(get_text("repost_quiz", lang), callback_data=f"repost_{quiz_id}")]
+            ]
+            await context.bot.send_message(
+                chat_id,
+                get_text("quiz_sent", lang),
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                reply_to_message_id=poll.message_id
+            )
+            # Update stats
             if is_private:
                 await conn.execute(
                     "INSERT OR IGNORE INTO user_stats(user_id, sent) VALUES (?, 0)",
@@ -194,13 +226,18 @@ async def process_queue(chat_id, context, user_id=None, is_private=False):
             await conn.commit()
         except Exception as e:
             logger.error(f"خطأ في معالجة الاستبيان: {e}")
-            # إعادة الإضافة إلى القائمة في حالة الفشل (اختياري)
+            # Re-queue the question in case of failure
             send_queues[chat_id].appendleft((q, opts, idx))
             break
 
 async def enqueue_mcq(msg, context, override=None, is_private=False):
     """Enqueue an MCQ for processing."""
-    cid = override or context.user_data.get("target_channel") or msg.chat.id
+    uid = msg.from_user.id
+    conn = await get_db()
+    # Check for default channel
+    row = await (await conn.execute("SELECT chat_id FROM default_channels WHERE user_id=?", (uid,))).fetchone()
+    default_channel = row[0] if row else None
+    cid = override or context.chat_data.get("target_channel", default_channel or msg.chat.id)
     lang = (msg.from_user.language_code or "en")[:2]
     context.user_data["lang"] = lang
     if len(send_queues[cid]) > 50:
@@ -237,21 +274,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     content = (msg.text or msg.caption or "").lower()
-    if chat_type in ["group", "supergroup"] and (
-        (msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id)
-        or (f"@{context.bot.username.lower()}" in content)
-    ):
-        await enqueue_mcq(msg, context, is_private=False)
-    else:
-        lang = (msg.from_user.language_code or "en")[:2]
-        await context.bot.send_message(msg.chat.id, get_text("invalid_format", lang))
+    bot_username = (await context.bot.get_me()).username.lower()
+    if chat_type in ["group", "supergroup"]:
+        if (
+            (msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id)
+            or content.strip().startswith(f"@{bot_username}")
+        ):
+            found = await enqueue_mcq(msg, context, is_private=False)
+            if not found:
+                lang = (msg.from_user.language_code or "en")[:2]
+                await context.bot.send_message(msg.chat.id, get_text("no_q", lang))
+        return
 
 async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle channel posts."""
     post = update.channel_post
     if not post:
-        return
-    if f"@{context.bot.username.lower()}" not in (post.text or post.caption or "").lower():
         return
     conn = await get_db()
     await conn.execute(
@@ -259,13 +297,28 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         (post.chat.id, post.chat.title or ""),
     )
     await conn.commit()
-    context.user_data["message_to_delete"] = post.message_id
-    await enqueue_mcq(post, context, is_private=False)
+    found = await enqueue_mcq(post, context, is_private=False)
+    if not found:
+        lang = (post.from_user.language_code or "en")[:2]
+        await context.bot.send_message(post.chat.id, get_text("no_q", lang))
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /start command."""
     lang = (getattr(update.effective_user, "language_code", "en") or "en")[:2]
     context.user_data["lang"] = lang
+    args = context.args
+    if args and args[0].startswith("quiz_"):
+        quiz_id = args[0][5:]
+        conn = await get_db()
+        row = await (await conn.execute("SELECT question, options, correct_option FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
+        if row:
+            q, opts_str, idx = row
+            opts = opts_str.split(":::")
+            send_queues[update.effective_chat.id].append((q, opts, idx))
+            asyncio.create_task(process_queue(update.effective_chat.id, context, user_id=update.effective_user.id, is_private=False, quiz_id=quiz_id))
+        else:
+            await update.message.reply_text(get_text("no_q", lang))
+        return
     kb = [
         [InlineKeyboardButton("📝 سؤال جديد", callback_data="new")],
         [InlineKeyboardButton("🔄 نشر في قناة", callback_data="publish_channel")],
@@ -275,6 +328,42 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.message.reply_text(
         get_text("start", lang), reply_markup=InlineKeyboardMarkup(kb)
+    )
+
+async def set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set a default channel for posting quizzes."""
+    lang = (getattr(update.effective_user, "language_code", "en") or "en")[:2]
+    conn = await get_db()
+    rows = await (await conn.execute("SELECT chat_id, title FROM known_channels")).fetchall()
+    if not rows:
+        await update.message.reply_text(get_text("no_channels", lang))
+        return
+    kb = [[InlineKeyboardButton(t, callback_data=f"set_default_{cid}")] for cid, t in rows]
+    await update.message.reply_text(
+        "اختر قناة لتعيينها كافتراضية:", reply_markup=InlineKeyboardMarkup(kb)
+    )
+
+async def repost(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Repost a quiz by ID."""
+    lang = (getattr(update.effective_user, "language_code", "en") or "en")[:2]
+    if not context.args:
+        await update.message.reply_text("❌ يرجى تقديم معرف الاختبار. مثال: /repost <quiz_id>")
+        return
+    quiz_id = context.args[0]
+    conn = await get_db()
+    row = await (await conn.execute("SELECT question, options, correct_option FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
+    if not row:
+        await update.message.reply_text(get_text("no_q", lang))
+        return
+    q, opts_str, idx = row
+    opts = opts_str.split(":::")
+    rows = await (await conn.execute("SELECT chat_id, title FROM known_channels")).fetchall()
+    if not rows:
+        await update.message.reply_text(get_text("no_channels", lang))
+        return
+    kb = [[InlineKeyboardButton(t, callback_data=f"repost_to_{quiz_id}_{cid}")] for cid, t in rows]
+    await update.message.reply_text(
+        "اختر مكانًا لإعادة النشر:", reply_markup=InlineKeyboardMarkup(kb)
     )
 
 async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -313,12 +402,53 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         cid = int(cmd.split("_")[1])
         row = await (await conn.execute("SELECT title FROM known_channels WHERE chat_id=?", (cid,))).fetchone()
         if row:
-            context.user_data["target_channel"] = cid
+            context.chat_data["target_channel"] = cid
             txt = f"✅ قناة محددة: {row[0]}. أرسل السؤال في الخاص.\n" + get_text(
                 "private_channel_warning", lang
             )
         else:
             txt = "❌ غير موجود"
+    elif cmd.startswith("set_default_"):
+        cid = int(cmd.split("_")[2])
+        row = await (await conn.execute("SELECT title FROM known_channels WHERE chat_id=?", (cid,))).fetchone()
+        if row:
+            await conn.execute(
+                "INSERT OR REPLACE INTO default_channels (user_id, chat_id, title) VALUES (?, ?, ?)",
+                (uid, cid, row[0]),
+            )
+            await conn.commit()
+            txt = get_text("set_channel_success", lang, title=row[0])
+        else:
+            txt = get_text("no_channels", lang)
+    elif cmd.startswith("repost_"):
+        quiz_id = cmd.split("_")[1]
+        row = await (await conn.execute("SELECT question, options, correct_option FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
+        if row:
+            q, opts_str, idx = row
+            opts = opts_str.split(":::")
+            rows = await (await conn.execute("SELECT chat_id, title FROM known_channels")).fetchall()
+            if not rows:
+                await update.callback_query.edit_message_text(get_text("no_channels", lang))
+                return
+            kb = [[InlineKeyboardButton(t, callback_data=f"repost_to_{quiz_id}_{cid}")] for cid, t in rows]
+            await update.callback_query.edit_message_text(
+                "اختر مكانًا لإعادة النشر:", reply_markup=InlineKeyboardMarkup(kb)
+            )
+            return
+        else:
+            txt = get_text("no_q", lang)
+    elif cmd.startswith("repost_to_"):
+        quiz_id, cid = cmd.split("_")[2:]
+        cid = int(cid)
+        row = await (await conn.execute("SELECT question, options, correct_option FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
+        if row:
+            q, opts_str, idx = row
+            opts = opts_str.split(":::")
+            send_queues[cid].append((q, opts, idx))
+            asyncio.create_task(process_queue(cid, context, user_id=uid, is_private=False, quiz_id=quiz_id))
+            txt = get_text("quiz_sent", lang)
+        else:
+            txt = get_text("no_q", lang)
     await update.callback_query.edit_message_text(txt)
 
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -356,6 +486,8 @@ def main():
     # إضافة المعالجات
     app.add_handler(CommandHandler(["start", "help"], start))
     app.add_handler(CommandHandler("channels", channels_command))
+    app.add_handler(CommandHandler("setchannel", set_channel))
+    app.add_handler(CommandHandler("repost", repost))
     app.add_handler(CallbackQueryHandler(callback_query_handler))
     app.add_handler(InlineQueryHandler(inline_query))
     app.add_handler(
@@ -367,7 +499,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     # تهيئة قاعدة البيانات وجدولة التنظيف
-    async def startup(application):  # Fixed: Added 'application' parameter
+    async def startup(application):
         conn = await get_db()
         await init_db(conn)
         asyncio.create_task(schedule_cleanup())
