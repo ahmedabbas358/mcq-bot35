@@ -21,32 +21,30 @@ from telegram.constants import ChatType
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# تعريف المتغيرات
 DB_PATH = 'stats.db'
 send_queues = defaultdict(deque)
 last_sent_time = defaultdict(float)
 _db_conn: aiosqlite.Connection = None
 
-# دعم الأرقام العربية والإنجليزية والحروف A-J و أ-ي
-ARABIC_DIGITS = {'٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'}
+# دعم الأرقام والحروف
+ARABIC_DIGITS = {'٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9'}
 ARABIC_DIGITS.update({str(i): str(i) for i in range(10)})
-EN_LETTERS = {chr(ord('A')+i): i for i in range(10)}
-EN_LETTERS.update({chr(ord('a')+i): i for i in range(10)})
-AR_LETTERS = {'أ':0,'ب':1,'ج':2,'د':3,'هـ':4,'و':5,'ز':6,'ح':7,'ط':8,'ي':9}
+EN_LETTERS = {chr(ord('A') + i): i for i in range(10)}
+EN_LETTERS.update({chr(ord('a') + i): i for i in range(10)})
+AR_LETTERS = {'أ': 0, 'ب': 1, 'ج': 2, 'د': 3, 'هـ': 4, 'و': 5, 'ز': 6, 'ح': 7, 'ط': 8, 'ي': 9}
 
-# أنماط regex
+# أنماط تحليل الأسئلة
 PATTERNS = [
-    re.compile(
-        r"Q[.:)]?\s*(?P<q>.+?)\s*(?P<opts>(?:[A-J1-9][).:]\s*.+?(?:\n|$)){2,10})"
-        r"(?:Answer|Ans|Correct Answer)[:：]?\s*(?P<ans>[A-Ja-j0-9])", re.S),
-    re.compile(
-        r"س[.:)]?\s*(?P<q>.+?)\s*(?P<opts>(?:[أ-ي١-٩][).:]\s*.+?(?:\n|$)){2,10})"
-        r"الإجابة\s+الصحيحة[:：]?\s*(?P<ans>[أ-ي١-٩])", re.S),
-    re.compile(
-        r"(?P<q>.+?)\n(?P<opts>(?:\s*[A-Za-zء-ي0-9][).:]\s*.+?(?:\n|$)){2,10})"
-        r"(?:Answer|Ans|الإجابة|Correct Answer)[:：]?\s*(?P<ans>[A-Za-zء-ي0-9])", re.S)
+    re.compile(r"Q[.:)]?\s*(?P<q>.+?)\s*(?P<opts>(?:[A-J1-9][).:]\s*.+?(?:\n|$)){2,10})"
+               r"(?:Answer|Ans|Correct Answer)[:：]?\s*(?P<ans>[A-Ja-j0-9])", re.S),
+    re.compile(r"س[.:)]?\s*(?P<q>.+?)\s*(?P<opts>(?:[أ-ي١-٩][).:]\s*.+?(?:\n|$)){2,10})"
+               r"الإجابة\s+الصحيحة[:：]?\s*(?P<ans>[أ-ي١-٩])", re.S),
+    re.compile(r"(?P<q>.+?)\n(?P<opts>(?:\s*[A-Za-zء-ي0-9][).:]\s*.+?(?:\n|$)){2,10})"
+               r"(?:Answer|Ans|الإجابة|Correct Answer)[:：]?\s*(?P<ans>[A-Za-zء-ي0-9])", re.S)
 ]
 
-# رسائل
+# الرسائل المترجمة
 TEXTS = {
     'start': {'en': '🤖 Hi! Choose an option:', 'ar': '🤖 أهلاً! اختر من القائمة:'},
     'help': {
@@ -56,11 +54,15 @@ TEXTS = {
     'new': {'en': '📩 Send your MCQ now!', 'ar': '📩 أرسل سؤال MCQ الآن!'},
     'stats': {'en': '📊 Private: {pr} questions.\n🏷️ Channel: {ch} posts.', 'ar': '📊 في الخاص: {pr} سؤال.\n🏷️ في القنوات: {ch} منشور.'},
     'queue_full': {'en': '🚫 Queue full, send fewer questions.', 'ar': '🚫 القائمة ممتلئة، أرسل أقل.'},
-    'no_q': {'en': '❌ No questions detected.', 'ar': '❌ لم أتعرف على أي سؤال.'},
+    'no_q': {'en': '❌ No questions detected.', 'ar': '❌ لم يتم العثور على أسئلة.'},
     'invalid_format': {'en': '⚠️ Invalid format.', 'ar': '⚠️ صيغة غير صحيحة.'},
-    'pollbot_link': {'en': '📢 Share vote: {link}', 'ar': '📢 شارك التصويت: {link}'}
+    'pollbot_link': {'en': '📢 Share vote: {link}', 'ar': '📢 شارك التصويت: {link}'},
+    'channels_list': {'en': '📺 Channels:\n{channels}', 'ar': '📺 القنوات:\n{channels}'},
+    'no_channels': {'en': '❌ No channels found.', 'ar': '❌ لا توجد قنوات.'},
+    'private_channel_warning': {'en': '⚠️ Ensure the bot is an admin in the private channel.', 'ar': '⚠️ تأكد أن البوت مشرف في القناة الخاصة.'}
 }
 
+# دوال المساعدة
 def get_text(key, lang, **kwargs):
     return TEXTS[key].get(lang, TEXTS[key]['en']).format(**kwargs)
 
@@ -85,7 +87,7 @@ async def schedule_cleanup():
             await conn.execute("DELETE FROM user_stats WHERE sent=0")
             await conn.commit()
         except Exception as e:
-            logger.warning(f"Cleanup error: {e}")
+            logger.warning(f"خطأ في التنظيف: {e}")
 
 def parse_mcq(text):
     res = []
@@ -95,29 +97,34 @@ def parse_mcq(text):
             raw = m.group('opts')
             opts = re.findall(r'[A-Za-zأ-ي0-9][).:]\s*(.+)', raw)
             ans = m.group('ans').strip()
-            if ans in ARABIC_DIGITS: ans = ARABIC_DIGITS[ans]
+            if ans in ARABIC_DIGITS:
+                ans = ARABIC_DIGITS[ans]
             idx = EN_LETTERS.get(ans) or AR_LETTERS.get(ans)
             if idx is None:
-                try: idx = int(ans) - 1
-                except: continue
-            if not (0 <= idx < len(opts)): continue
+                try:
+                    idx = int(ans) - 1
+                except:
+                    continue
+            if not (0 <= idx < len(opts)):
+                continue
             res.append((q, opts, idx))
     return res
 
-async def process_queue(chat_id, context, user_id=None, msg_id=None, is_private=False):
+# إرسال الاستبيانات
+async def process_queue(chat_id, context, user_id=None, is_private=False):
     conn = await get_db()
-    deleted = False
     while send_queues[chat_id]:
         q, opts, idx = send_queues[chat_id].popleft()
         try:
             await context.bot.send_poll(chat_id, q, opts, type=Poll.QUIZ, correct_option_id=idx, is_anonymous=False)
             await asyncio.sleep(0.5)
-            if msg_id and not deleted:
+            msg_id = context.user_data.pop('message_to_delete', None)
+            if msg_id:
                 try:
-                    await context.bot.delete_message(chat_id, msg_id)
-                    deleted = True
-                except: pass
-            link = f"https://t.me/PollBot?startgroup={hashlib.md5((q+':::'.join(opts)).encode()).hexdigest()}"
+                    await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+                except Exception as e:
+                    logger.warning(f"فشل حذف الرسالة: {e}")
+            link = f"https://t.me/PollBot?startgroup={hashlib.md5((q + ':::'.join(opts)).encode()).hexdigest()}"
             lang = context.user_data.get('lang', 'en')
             await context.bot.send_message(chat_id, get_text('pollbot_link', lang, link=link))
             if is_private:
@@ -128,7 +135,7 @@ async def process_queue(chat_id, context, user_id=None, msg_id=None, is_private=
                 await conn.execute('UPDATE channel_stats SET sent=sent+1 WHERE chat_id=?', (chat_id,))
             await conn.commit()
         except Exception as e:
-            logger.warning(f"Send poll failed: {e}")
+            logger.warning(f"فشل إرسال الاستبيان: {e}")
 
 async def enqueue_mcq(msg, context, override=None, is_private=False):
     cid = override or context.user_data.get("target_channel") or msg.chat.id
@@ -145,16 +152,19 @@ async def enqueue_mcq(msg, context, override=None, is_private=False):
             send_queues[cid].append((q, o, i))
             found = True
     if found:
-        asyncio.create_task(process_queue(cid, context, user_id=msg.from_user.id, msg_id=msg.message_id, is_private=is_private))
+        context.user_data['message_to_delete'] = msg.message_id
+        asyncio.create_task(process_queue(cid, context, user_id=msg.from_user.id, is_private=is_private))
     return found
 
+# المعالجات
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
-    if not msg or not (msg.text or msg.caption): return
+    if not msg or not (msg.text or msg.caption):
+        return
     uid = msg.from_user.id
-    if time.time() - last_sent_time[uid] < 3: return
+    if time.time() - last_sent_time[uid] < 3:
+        return
     last_sent_time[uid] = time.time()
-
     chat_type = msg.chat.type
     if chat_type == ChatType.PRIVATE:
         found = await enqueue_mcq(msg, context, is_private=True)
@@ -162,27 +172,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             lang = (msg.from_user.language_code or 'en')[:2]
             await context.bot.send_message(msg.chat.id, get_text('no_q', lang))
         return
-
     content = (msg.text or msg.caption or '').lower()
     if chat_type in ['group', 'supergroup'] and (
         (msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id) or
         f"@{context.bot.username.lower()}" in content
     ):
         await enqueue_mcq(msg, context, is_private=False)
-        try: await context.bot.delete_message(msg.chat.id, msg.message_id)
-        except: pass
     else:
         lang = (msg.from_user.language_code or 'en')[:2]
         await context.bot.send_message(msg.chat.id, get_text('invalid_format', lang))
 
 async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     post = update.channel_post
-    if not post: return
+    if not post:
+        return
     if f"@{context.bot.username.lower()}" not in (post.text or post.caption or '').lower():
         return
     conn = await get_db()
-    await conn.execute('INSERT OR IGNORE INTO known_channels(chat_id,title) VALUES (?,?)', (post.chat.id, post.chat.title or ''))
+    await conn.execute('INSERT OR IGNORE INTO known_channels(chat_id,title) VALUES (?,?)', 
+                       (post.chat.id, post.chat.title or ''))
     await conn.commit()
+    context.user_data['message_to_delete'] = post.message_id
     await enqueue_mcq(post, context, is_private=False)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -203,7 +213,6 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     lang = context.user_data.get('lang', 'en')
     conn = await get_db()
     txt = '⚠️ غير مدعوم'
-
     if cmd == 'help':
         txt = get_text('help', lang)
     elif cmd == 'new':
@@ -211,14 +220,18 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif cmd == 'stats':
         r = await (await conn.execute('SELECT sent FROM user_stats WHERE user_id=?', (uid,))).fetchone()
         s = await (await conn.execute('SELECT SUM(sent) FROM channel_stats')).fetchone()
-        txt = get_text('stats', lang, pr=r[0] if r else 0, ch=s[0] if s and s[0] else 0)
+        txt = get_text('stats', lang, pr=r[0] if r else 0, ch=s[0] if s else 0)
     elif cmd == 'channels':
         rows = await (await conn.execute('SELECT chat_id,title FROM known_channels')).fetchall()
-        txt = 'لا توجد قنوات' if not rows else '\n'.join(f"- {t}: `{cid}`" for cid, t in rows)
+        if not rows:
+            txt = get_text('no_channels', lang)
+        else:
+            channels_list = '\n'.join(f"- {t}: `{cid}`" for cid, t in rows)
+            txt = get_text('channels_list', lang, channels=channels_list)
     elif cmd == 'publish_channel':
         rows = await (await conn.execute('SELECT chat_id,title FROM known_channels')).fetchall()
         if not rows:
-            await update.callback_query.edit_message_text('❌ لا توجد قنوات.')
+            await update.callback_query.edit_message_text(get_text('no_channels', lang))
             return
         kb = [[InlineKeyboardButton(t, callback_data=f'choose_{cid}')] for cid, t in rows]
         await update.callback_query.edit_message_text('اختر قناة:', reply_markup=InlineKeyboardMarkup(kb))
@@ -228,37 +241,48 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         row = await (await conn.execute('SELECT title FROM known_channels WHERE chat_id=?', (cid,))).fetchone()
         if row:
             context.user_data['target_channel'] = cid
-            txt = f"✅ قناة محددة: {row[0]}. أرسل السؤال في الخاص."
+            txt = f"✅ قناة محددة: {row[0]}. أرسل السؤال في الخاص.\n" + get_text('private_channel_warning', lang)
         else:
             txt = '❌ غير موجود'
-    await update.callback_query.edit_message_text(txt, parse_mode='Markdown')
+    await update.callback_query.edit_message_text(txt)
 
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.inline_query.query
-    if not q: return
+    if not q:
+        return
     result = InlineQueryResultArticle(
         id='1',
-        title='MCQ تحويل',
+        title='تحويل إلى MCQ',
         input_message_content=InputTextMessageContent(q)
     )
     await update.inline_query.answer([result])
 
+async def channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lang = (getattr(update.effective_user, 'language_code', 'en') or 'en')[:2]
+    conn = await get_db()
+    rows = await (await conn.execute('SELECT chat_id,title FROM known_channels')).fetchall()
+    if not rows:
+        txt = get_text('no_channels', lang)
+    else:
+        channels_list = '\n'.join(f"- {t}: `{cid}`" for cid, t in rows)
+        txt = get_text('channels_list', lang, channels=channels_list)
+    await update.message.reply_text(txt)
+
+# التشغيل الرئيسي
 async def main():
     conn = await get_db()
     await init_db(conn)
     asyncio.create_task(schedule_cleanup())
-
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     if not token:
         raise RuntimeError('❌ Bot token not found.')
-
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler(['start', 'help'], start))
+    app.add_handler(CommandHandler('channels', channels_command))
     app.add_handler(CallbackQueryHandler(callback_query_handler))
     app.add_handler(InlineQueryHandler(inline_query))
     app.add_handler(MessageHandler(filters.ChatType.CHANNEL & (filters.TEXT | filters.Caption()), handle_channel_post))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
     logger.info("✅ Bot is running...")
     await app.run_polling()
 
