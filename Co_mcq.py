@@ -57,7 +57,7 @@ PATTERNS = [
         re.S,
     ),
     re.compile(
-        r"(?P<q>.+?)\n(?P<opts>(?:\s*(?:[A-Za-zأ-ل0-9١-٩]|-|\*|\d+)[).:]\s*.+?(?:\n|$)){2,10})"
+        r beware of the dog"(?P<q>.+?)\n(?P<opts>(?:\s*(?:[A-Za-zأ-ل0-9١-٩]|-|\*|\d+)[).:]\s*.+?(?:\n|$)){2,10})"
         r"(?:Answer|Ans|الإجابة|Correct Answer)[:：]?\s*(?P<ans>[A-Za-zأ-ل0-9١-٩])",
         re.S,
     ),
@@ -200,7 +200,7 @@ async def build_main_menu(lang: str, state: str = "main") -> InlineKeyboardMarku
         conn = await get_db()
         rows = await (await conn.execute("SELECT chat_id, title FROM known_channels")).fetchall()
         kb = [[InlineKeyboardButton(t, callback_data=f"choose_{cid}")] for cid, t in rows]
-        kb.append([InlineKeyboardButton("🔙 Back", callback_data="main")])
+        kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])  # Added cancel button
     return InlineKeyboardMarkup(kb)
 
 async def process_queue(chat_id: int, context: ContextTypes.DEFAULT_TYPE, user_id: int = None, is_private: bool = False, quiz_id: str = None):
@@ -211,7 +211,6 @@ async def process_queue(chat_id: int, context: ContextTypes.DEFAULT_TYPE, user_i
     while send_queues[chat_id]:
         q, opts, idx = send_queues[chat_id].popleft()
         quiz_hash = hashlib.md5((q + ':::'.join(opts)).encode()).hexdigest()
-        # Check for duplicates in both cache and database
         if quiz_hash in quiz_cache[chat_id]:
             logger.debug(f"Skipped duplicate quiz in cache for chat {chat_id}: {q[:50]}...")
             continue
@@ -222,7 +221,6 @@ async def process_queue(chat_id: int, context: ContextTypes.DEFAULT_TYPE, user_i
             continue
         quiz_cache[chat_id].add(quiz_hash)
         try:
-            # Verify bot permissions for non-private chats
             if not is_private:
                 try:
                     bot_member = await context.bot.get_chat_member(chat_id, context.bot.id)
@@ -233,7 +231,6 @@ async def process_queue(chat_id: int, context: ContextTypes.DEFAULT_TYPE, user_i
                     logger.error(f"Failed to verify bot permissions in chat {chat_id}: {e}")
                     await context.bot.send_message(chat_id, get_text("not_admin", context.user_data.get("lang", "en")))
                     continue
-            # Send poll
             poll = await context.bot.send_poll(
                 chat_id,
                 q,
@@ -244,14 +241,12 @@ async def process_queue(chat_id: int, context: ContextTypes.DEFAULT_TYPE, user_i
                 parse_mode="MarkdownV2",
             )
             await asyncio.sleep(0.5)
-            # Clean up original message
             msg_id = context.user_data.pop("message_to_delete", None)
             if msg_id:
                 try:
                     await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
                 except Exception as e:
                     logger.warning(f"Failed to delete message {msg_id} in chat {chat_id}: {e}")
-            # Generate quiz ID if not provided
             if not quiz_id:
                 quiz_id = quiz_hash
                 await conn.execute(
@@ -259,7 +254,6 @@ async def process_queue(chat_id: int, context: ContextTypes.DEFAULT_TYPE, user_i
                     (quiz_id, q, ':::'.join(opts), idx, user_id),
                 )
                 await conn.commit()
-            # Build share/repost buttons
             lang = context.user_data.get("lang", "en")
             keyboard = [
                 [InlineKeyboardButton(get_text("share_quiz", lang), callback_data=f"share_{quiz_id}")],
@@ -271,7 +265,6 @@ async def process_queue(chat_id: int, context: ContextTypes.DEFAULT_TYPE, user_i
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 reply_to_message_id=poll.message_id,
             )
-            # Update stats
             if is_private:
                 await conn.execute(
                     "INSERT OR IGNORE INTO user_stats(user_id, sent) VALUES (?, 0)",
@@ -305,7 +298,7 @@ async def enqueue_mcq(msg: Update.message, context: ContextTypes.DEFAULT_TYPE, o
     """Enqueue MCQ for processing."""
     uid = msg.from_user.id
     lang = context.user_data.get("lang", "en")
-    if time.time() - last_sent_time[uid] < 2:  # Rate limit: 1 quiz per 2 seconds
+    if time.time() - last_sent_time[uid] < 2:
         await context.bot.send_message(msg.chat.id, get_text("rate_limit", lang))
         return False
     last_sent_time[uid] = time.time()
@@ -347,10 +340,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     chat_type = msg.chat.type
     lang = context.user_data.get("lang", "en")
-    # Pre-check for MCQ format in groups to avoid unnecessary replies
     text = (msg.text or msg.caption or "").strip()
     if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-        if not parse_mcq(text):  # Only process if text resembles an MCQ
+        if not parse_mcq(text):
             return
     if chat_type == ChatType.PRIVATE and context.user_data.get("awaiting_mcq"):
         found = await enqueue_mcq(msg, context, is_private=True)
@@ -359,10 +351,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             rows = await (await conn.execute("SELECT chat_id, title FROM known_channels")).fetchall()
             if rows:
                 kb = [[InlineKeyboardButton(t, callback_data=f"post_to_{cid}")] for cid, t in rows]
+                kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])  # Added cancel button
                 await msg.reply_text("Choose where to post:", reply_markup=InlineKeyboardMarkup(kb))
             else:
                 await msg.reply_text(get_text("no_channels", lang))
-            context.user_data["awaiting_mcq"] = False  # Clear state to avoid repeated prompts
+            context.user_data["awaiting_mcq"] = False
             return
         else:
             await msg.reply_text(get_text("no_q", lang))
@@ -413,7 +406,7 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
     lang = context.user_data.get("lang", update.effective_user.language_code[:2] if update.effective_user.language_code else "en")
-    context.user_data["lang"] = lang  # Ensure lang is set
+    context.user_data["lang"] = lang
     args = context.args
     if args and args[0].startswith("quiz_"):
         quiz_id = args[0][5:]
@@ -427,7 +420,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text(get_text("no_q", lang))
         return
-    # Add reply keyboard for persistent menu
     reply_kb = ReplyKeyboardMarkup(
         [["📝 New Quiz", "🔄 Publish to Channel"], ["📊 My Stats", "📺 Channels"], ["📘 Help"]],
         resize_keyboard=True,
@@ -441,13 +433,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set default channel for quizzes."""
     lang = context.user_data.get("lang", "en")
-    context.user_data["lang"] = lang  # Ensure lang is set
+    context.user_data["lang"] = lang
     conn = await get_db()
     rows = await (await conn.execute("SELECT chat_id, title FROM known_channels")).fetchall()
     if not rows:
         await update.message.reply_text(get_text("no_channels", lang))
         return
     kb = [[InlineKeyboardButton(t, callback_data=f"set_default_{cid}")] for cid, t in rows]
+    kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])  # Added cancel button
     await update.message.reply_text(
         "Choose a default channel:", reply_markup=InlineKeyboardMarkup(kb)
     )
@@ -455,7 +448,7 @@ async def set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def repost(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Repost a quiz by ID."""
     lang = context.user_data.get("lang", "en")
-    context.user_data["lang"] = lang  # Ensure lang is set
+    context.user_data["lang"] = lang
     if not context.args:
         await update.message.reply_text("❌ Provide quiz ID. Example: /repost <quiz_id>")
         return
@@ -470,6 +463,7 @@ async def repost(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(get_text("no_channels", lang))
         return
     kb = [[InlineKeyboardButton(t, callback_data=f"repost_to_{quiz_id}_{cid}")] for cid, t in rows]
+    kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])  # Added cancel button
     await update.message.reply_text(
         "Choose repost destination:", reply_markup=InlineKeyboardMarkup(kb)
     )
@@ -486,7 +480,7 @@ async def language(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List quizzes created by user."""
     lang = context.user_data.get("lang", "en")
-    context.user_data["lang"] = lang  # Ensure lang is set
+    context.user_data["lang"] = lang
     uid = update.effective_user.id
     conn = await get_db()
     rows = await (await conn.execute("SELECT quiz_id, question FROM quizzes WHERE user_id=?", (uid,))).fetchall()
@@ -501,10 +495,12 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     cmd = update.callback_query.data
     uid = update.effective_user.id
     lang = context.user_data.get("lang", "en")
-    context.user_data["lang"] = lang  # Ensure lang is set
+    context.user_data["lang"] = lang
     conn = await get_db()
     txt = "⚠️ Unsupported"
     state = "main"
+    # Show main menu after every major action for better navigation
+    reply_markup = await build_main_menu(lang, state)
     if cmd == "help":
         txt = get_text("help", lang)
     elif cmd == "new":
@@ -520,6 +516,10 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif cmd == "publish_channel":
         state = "publish_channel"
         txt = "Choose a channel:"
+        reply_markup = await build_main_menu(lang, state)
+    elif cmd == "main":  # Handle cancel action
+        txt = get_text("start", lang)
+        context.user_data["awaiting_mcq"] = False
     elif cmd.startswith("choose_"):
         cid = int(cmd.split("_")[1])
         row = await (await conn.execute("SELECT title FROM known_channels WHERE chat_id=?", (cid,))).fetchone()
@@ -549,6 +549,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
                 txt = get_text("no_channels", lang)
             else:
                 kb = [[InlineKeyboardButton(t, callback_data=f"repost_to_{quiz_id}_{cid}")] for cid, t in rows]
+                kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])  # Added cancel button
                 await update.callback_query.edit_message_text(
                     "Choose repost destination:", reply_markup=InlineKeyboardMarkup(kb)
                 )
@@ -564,7 +565,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
             opts = opts_str.split(":::")
             quiz_hash = hashlib.md5((q + ':::'.join(opts)).encode()).hexdigest()
             if quiz_hash in quiz_cache[cid]:
-                txt = get_text("no_q", lang)  # Avoid reposting duplicates
+                txt = get_text("no_q", lang)
             else:
                 send_queues[cid].append((q, opts, idx))
                 asyncio.create_task(process_queue(cid, context, user_id=uid, is_private=False, quiz_id=quiz_id))
@@ -578,6 +579,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
             txt = get_text("no_channels", lang)
         else:
             kb = [[InlineKeyboardButton(t, callback_data=f"share_to_{quiz_id}_{cid}")] for cid, t in rows]
+            kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])  # Added cancel button
             txt = "Choose where to share:"
             await update.callback_query.edit_message_text(
                 txt, reply_markup=InlineKeyboardMarkup(kb)
@@ -592,7 +594,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
             opts = opts_str.split(":::")
             quiz_hash = hashlib.md5((q + ':::'.join(opts)).encode()).hexdigest()
             if quiz_hash in quiz_cache[cid]:
-                txt = get_text("no_q", lang)  # Avoid sharing duplicates
+                txt = get_text("no_q", lang)
             else:
                 send_queues[cid].append((q, opts, idx))
                 asyncio.create_task(process_queue(cid, context, user_id=uid, is_private=False, quiz_id=quiz_id))
@@ -609,10 +611,13 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         else:
             txt = get_text("no_channels", lang)
         context.user_data["awaiting_mcq"] = False
-    await update.callback_query.edit_message_text(txt, reply_markup=await build_main_menu(lang, state))
+    await update.callback_query.edit_message_text(txt, reply_markup=reply_markup)
 
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle inline queries."""
+    """Handle inline queries with spam protection."""
+    if not update.inline_query.from_user:  # Prevent anonymous queries
+        logger.warning("Blocked anonymous inline query")
+        return
     query = update.inline_query.query
     results = []
     if query.startswith("quiz_"):
@@ -638,12 +643,16 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 input_message_content=InputTextMessageContent(query, parse_mode="MarkdownV2"),
             )
         )
+    # Limit results to prevent spam
+    if len(results) > 5:
+        results = results[:5]
+        logger.warning(f"Limited inline query results for user {update.inline_query.from_user.id}")
     await update.inline_query.answer(results)
 
 async def channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /channels command."""
     lang = context.user_data.get("lang", "en")
-    context.user_data["lang"] = lang  # Ensure lang is set
+    context.user_data["lang"] = lang
     conn = await get_db()
     rows = await (await conn.execute("SELECT chat_id, title FROM known_channels")).fetchall()
     txt = get_text("no_channels", lang) if not rows else get_text("channels_list", lang, channels="\n".join(f"- {t}: {cid}" for cid, t in rows))
@@ -657,7 +666,6 @@ def main():
     
     app = Application.builder().token(token).build()
 
-    # Add handlers
     app.add_handler(CommandHandler(["start", "help"], start))
     app.add_handler(CommandHandler("channels", channels_command))
     app.add_handler(CommandHandler("setchannel", set_channel))
@@ -674,7 +682,6 @@ def main():
     )
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    # Initialize database
     async def startup(application):
         conn = await get_db()
         await init_db(conn)
@@ -682,7 +689,6 @@ def main():
 
     app.post_init = startup
 
-    # Close database on shutdown
     async def shutdown(application):
         await close_db()
 
