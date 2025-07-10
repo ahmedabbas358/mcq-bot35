@@ -99,8 +99,8 @@ PATTERNS = [
 TEXTS = {
     "start": {"en": "🤖 Welcome! Choose an option:", "ar": "🤖 أهلاً! اختر خيارًا:"},
     "help": {
-        "en": "🆘 Usage:\n- Send MCQ in private.\n- Publish to channel: use 🔄 or /setchannel.\n- In groups: reply or mention bot.\nExample:\nQ: ...\nA) ...\nB) ...\nAnswer: A",
-        "ar": "🆘 الاستخدام:\n- أرسل MCQ في الخاص.\n- انشر في قناة: استخدم 🔄 أو /setchannel.\n- في المجموعات: رد أو اذكر البوت.\nمثال:\nس: ...\nأ) ...\nب) ...\nالإجابة: أ",
+        "en": "🆘 Usage:\n- Send MCQ in private.\n- Publish to channel: use 🔄 or /setchannel.\n- In groups: reply or mention bot.\nExample:\nQ: ...\nA) ...\nB) ... \nAnswer: A",
+        "ar": "🆘 الاستخدام:\n- أرسل MCQ في الخاص.\n- انشر في قناة: استخدم 🔄 أو /setchannel.\n- في المجموعات: رد أو اذكر البوت.\nمثال:\nس: ...\nأ) ...\nب) ... \nالإجابة: أ",
     },
     "new": {"en": "📝 Send your MCQ now!", "ar": "📝 أرسل سؤال MCQ الآن!"},
     "stats": {
@@ -696,11 +696,10 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
                 return
         else:
             txt = get_text("no_q", lang)
-    elif cmd.startswith("repost_to_"):
+    elif cmd.startswith("repost_to_ ."):
         _, quiz_id, cid = cmd.split("_", 2)
         cid = int(cid)
         row = await (await conn.execute("SELECT question, options, correct_option, explanation FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
- Anchors
         if row:
             q, opts_str, idx, expl = row
             opts = opts_str.split(":::")
@@ -823,7 +822,7 @@ def main() -> None:
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         raise RuntimeError("❌ Bot token not found. Set TELEGRAM_BOT_TOKEN.")
-    
+
     app = Application.builder().token(token).build()
 
     app.add_handler(CommandHandler(["start", "help"], start))
@@ -859,4 +858,4 @@ def main() -> None:
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    main()
+    main() 
