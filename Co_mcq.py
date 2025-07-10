@@ -57,7 +57,7 @@ PATTERNS = [
         re.S,
     ),
     re.compile(
-        r beware of the dog"(?P<q>.+?)\n(?P<opts>(?:\s*(?:[A-Za-zأ-ل0-9١-٩]|-|\*|\d+)[).:]\s*.+?(?:\n|$)){2,10})"
+        r"(?P<q>.+?)\n(?P<opts>(?:\s*(?:[A-Za-zأ-ل0-9١-٩]|-|\*|\d+)[).:]\s*.+?(?:\n|$)){2,10})"
         r"(?:Answer|Ans|الإجابة|Correct Answer)[:：]?\s*(?P<ans>[A-Za-zأ-ل0-9١-٩])",
         re.S,
     ),
@@ -105,11 +105,17 @@ def get_text(key, lang, **kwargs):
     return TEXTS[key].get(lang, TEXTS[key]["en"]).format(**kwargs)
 
 async def get_db():
-    """Get singleton database connection."""
+    """Get singleton database connection and ensure initialization."""
     global _db_conn
     if _db_conn is None:
-        _db_conn = await aiosqlite.connect(DB_PATH)
-        await _db_conn.execute("CREATE INDEX IF NOT EXISTS idx_quiz_id ON quizzes (quiz_id)")
+        try:
+            _db_conn = await aiosqlite.connect(DB_PATH)
+            await init_db(_db_conn)  # Ensure tables are created before indexing
+            await _db_conn.execute("CREATE INDEX IF NOT EXISTS idx_quiz_id ON quizzes (quiz_id)")
+            await _db_conn.commit()
+        except Exception as e:
+            logger.error(f"Failed to initialize database: {e}")
+            raise
     return _db_conn
 
 async def close_db():
@@ -121,22 +127,26 @@ async def close_db():
 
 async def init_db(conn):
     """Initialize database tables."""
-    await conn.execute(
-        "CREATE TABLE IF NOT EXISTS user_stats (user_id INTEGER PRIMARY KEY, sent INTEGER DEFAULT 0)"
-    )
-    await conn.execute(
-        "CREATE TABLE IF NOT EXISTS channel_stats (chat_id INTEGER PRIMARY KEY, sent INTEGER DEFAULT 0)"
-    )
-    await conn.execute(
-        "CREATE TABLE IF NOT EXISTS known_channels (chat_id INTEGER PRIMARY KEY, title TEXT)"
-    )
-    await conn.execute(
-        "CREATE TABLE IF NOT EXISTS quizzes (quiz_id TEXT PRIMARY KEY, question TEXT, options TEXT, correct_option INTEGER, user_id INTEGER)"
-    )
-    await conn.execute(
-        "CREATE TABLE IF NOT EXISTS default_channels (user_id INTEGER PRIMARY KEY, chat_id INTEGER, title TEXT)"
-    )
-    await conn.commit()
+    try:
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS user_stats (user_id INTEGER PRIMARY KEY, sent INTEGER DEFAULT 0)"
+        )
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS channel_stats (chat_id INTEGER PRIMARY KEY, sent INTEGER DEFAULT 0)"
+        )
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS known_channels (chat_id INTEGER PRIMARY KEY, title TEXT)"
+        )
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS quizzes (quiz_id TEXT PRIMARY KEY, question TEXT, options TEXT, correct_option INTEGER, user_id INTEGER)"
+        )
+        await conn.execute(
+            "CREATE TABLE IF NOT EXISTS default_channels (user_id INTEGER PRIMARY KEY, chat_id INTEGER, title TEXT)"
+        )
+        await conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to create database tables: {e}")
+        raise
 
 async def schedule_cleanup():
     """Periodically clean unused database entries and in-memory cache."""
@@ -200,7 +210,7 @@ async def build_main_menu(lang: str, state: str = "main") -> InlineKeyboardMarku
         conn = await get_db()
         rows = await (await conn.execute("SELECT chat_id, title FROM known_channels")).fetchall()
         kb = [[InlineKeyboardButton(t, callback_data=f"choose_{cid}")] for cid, t in rows]
-        kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])  # Added cancel button
+        kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])
     return InlineKeyboardMarkup(kb)
 
 async def process_queue(chat_id: int, context: ContextTypes.DEFAULT_TYPE, user_id: int = None, is_private: bool = False, quiz_id: str = None):
@@ -351,7 +361,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             rows = await (await conn.execute("SELECT chat_id, title FROM known_channels")).fetchall()
             if rows:
                 kb = [[InlineKeyboardButton(t, callback_data=f"post_to_{cid}")] for cid, t in rows]
-                kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])  # Added cancel button
+                kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])
                 await msg.reply_text("Choose where to post:", reply_markup=InlineKeyboardMarkup(kb))
             else:
                 await msg.reply_text(get_text("no_channels", lang))
@@ -440,7 +450,7 @@ async def set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(get_text("no_channels", lang))
         return
     kb = [[InlineKeyboardButton(t, callback_data=f"set_default_{cid}")] for cid, t in rows]
-    kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])  # Added cancel button
+    kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])
     await update.message.reply_text(
         "Choose a default channel:", reply_markup=InlineKeyboardMarkup(kb)
     )
@@ -463,7 +473,7 @@ async def repost(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(get_text("no_channels", lang))
         return
     kb = [[InlineKeyboardButton(t, callback_data=f"repost_to_{quiz_id}_{cid}")] for cid, t in rows]
-    kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])  # Added cancel button
+    kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])
     await update.message.reply_text(
         "Choose repost destination:", reply_markup=InlineKeyboardMarkup(kb)
     )
@@ -499,7 +509,6 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     conn = await get_db()
     txt = "⚠️ Unsupported"
     state = "main"
-    # Show main menu after every major action for better navigation
     reply_markup = await build_main_menu(lang, state)
     if cmd == "help":
         txt = get_text("help", lang)
@@ -517,7 +526,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         state = "publish_channel"
         txt = "Choose a channel:"
         reply_markup = await build_main_menu(lang, state)
-    elif cmd == "main":  # Handle cancel action
+    elif cmd == "main":
         txt = get_text("start", lang)
         context.user_data["awaiting_mcq"] = False
     elif cmd.startswith("choose_"):
@@ -549,7 +558,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
                 txt = get_text("no_channels", lang)
             else:
                 kb = [[InlineKeyboardButton(t, callback_data=f"repost_to_{quiz_id}_{cid}")] for cid, t in rows]
-                kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])  # Added cancel button
+                kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])
                 await update.callback_query.edit_message_text(
                     "Choose repost destination:", reply_markup=InlineKeyboardMarkup(kb)
                 )
@@ -579,7 +588,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
             txt = get_text("no_channels", lang)
         else:
             kb = [[InlineKeyboardButton(t, callback_data=f"share_to_{quiz_id}_{cid}")] for cid, t in rows]
-            kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])  # Added cancel button
+            kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])
             txt = "Choose where to share:"
             await update.callback_query.edit_message_text(
                 txt, reply_markup=InlineKeyboardMarkup(kb)
@@ -615,7 +624,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
 
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle inline queries with spam protection."""
-    if not update.inline_query.from_user:  # Prevent anonymous queries
+    if not update.inline_query.from_user:
         logger.warning("Blocked anonymous inline query")
         return
     query = update.inline_query.query
@@ -643,7 +652,6 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 input_message_content=InputTextMessageContent(query, parse_mode="MarkdownV2"),
             )
         )
-    # Limit results to prevent spam
     if len(results) > 5:
         results = results[:5]
         logger.warning(f"Limited inline query results for user {update.inline_query.from_user.id}")
