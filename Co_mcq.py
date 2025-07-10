@@ -51,15 +51,47 @@ AR_LETTERS = {"أ": 0, "ب": 1, "ج": 2, "د": 3, "هـ": 4, "و": 5, "ز": 6, "
 
 # Regex patterns for MCQ parsing
 PATTERNS = [
+    # English Q: with A), B), etc.
     re.compile(
-        r"(?:Q|س)[.:)]?\s*(?P<q>.+?)\s*(?P<opts>(?:(?:[A-La-lأ-ل1-9١-٩]|-|\*|\d+)[).:]\s*.+?(?:\n|$)){2,10})"
-        r"(?:Answer|Ans|Correct Answer|الإجابة\s+الصحيحة)[:：]?\s*(?P<ans>[A-La-lأ-ل0-9١-٩])",
-        re.S,
+        r"(?:Q|Question)[.:)]?\s*(?P<q>.+?)\s*(?P<opts>(?:[A-J][).:]\s*.+?(?:\n|$)){2,10})"
+        r"(?P<expl>(?:Explanation|تفسير)[:：]?\s*.+?)?\s*"
+        r"(?:Answer|Ans|Correct Answer|الإجابة\s*الصحيحة|الإجابة|الجواب)[:：]?\s*(?P<ans>[A-J0-9])",
+        re.S | re.UNICODE,
     ),
+    # Arabic س: with أ), ب), etc.
     re.compile(
-        r"(?P<q>.+?)\n(?P<opts>(?:\s*(?:[A-Za-zأ-ل0-9١-٩]|-|\*|\d+)[).:]\s*.+?(?:\n|$)){2,10})"
-        r"(?:Answer|Ans|الإجابة|Correct Answer)[:：]?\s*(?P<ans>[A-Za-zأ-ل0-9١-٩])",
-        re.S,
+        r"(?:س|سؤال)[.:)]?\s*(?P<q>.+?)\s*(?P<opts>(?:[أ-ي][).:]\s*.+?(?:\n|$)){2,10})"
+        r"(?P<expl>(?:Explanation|تفسير)[:：]?\s*.+?)?\s*"
+        r"(?:Answer|Ans|Correct Answer|الإجابة\s*الصحيحة|الإجابة|الجواب)[:：]?\s*(?P<ans>[أ-ي١-٩])",
+        re.S | re.UNICODE,
+    ),
+    # No prefix, with A), B), or 1), 2), etc.
+    re.compile(
+        r"(?P<q>.+?)\s*(?P<opts>(?:[A-Za-zأ-ي0-9١-٩][).:]\s*.+?(?:\n|$)){2,10})"
+        r"(?P<expl>(?:Explanation|تفسير)[:：]?\s*.+?)?\s*"
+        r"(?:Answer|Ans|الإجابة|Correct Answer|الجواب)[:：]?\s*(?P<ans>[A-Za-zأ-ي0-9١-٩])",
+        re.S | re.UNICODE,
+    ),
+    # Arabic with dot-separated options (أ., ب., etc.)
+    re.compile(
+        r"(?:س|سؤال)[.:)]?\s*(?P<q>.+?)\s*(?P<opts>(?:[أ-ي]\.\s*.+?(?:\n|$)){2,10})"
+        r"(?P<expl>(?:Explanation|تفسير)[:：]?\s*.+?)?\s*"
+        r"(?:Answer|Ans|Correct Answer|الإجابة\s*الصحيحة|الإجابة|الجواب)[:：]?\s*(?P<ans>[أ-ي١-٩])",
+        re.S | re.UNICODE,
+    ),
+    # Numeric options (1., 2., 1), 2), etc.)
+    re.compile(
+        r"(?:Q|س|Question|سؤال)?[.:)]?\s*(?P<q>.+?)\s*(?P<opts>(?:\d+[).:]\s*.+?(?:\n|$)){2,10})"
+        r"(?P<expl>(?:Explanation|تفسير)[:：]?\s*.+?)?\s*"
+        r"(?:Answer|Ans|الإجابة|Correct Answer|الجواب)[:：]?\s*(?P<ans>[0-9١-٩])",
+        re.S | re.UNICODE,
+    ),
+    # Simple letter/number options (A , 1 , etc.)
+    re.compile(
+        r"(?:Q|س|Question|سؤال)?[.:)]?\s*(?P<q>.+?)\s*(?P<opts>(?:[A-Za-zأ-ي0-9١-٩]\s+.+?(?:\n|$)){2,10})"
+        r"(?P<expl>(?:Explanation|تفسير)[:：]?\s*.+?)?\s*"
+        r"(?:Answer|Ans|الإجابة|Correct Answer|الجواب)[:：]?\s*(?P<ans>[A-Za-zأ-ي0-9١-٩])",
+        re.S | re.UNICODE,
     ),
 ]
 
@@ -81,6 +113,7 @@ TEXTS = {
         "ar": "❌ لم يتم العثور على أسئلة صحيحة.\n\nمثال:\nس: ما هي عاصمة فرنسا؟\nأ) لندن\nب) باريس\nالإجابة: ب",
     },
     "invalid_format": {"en": "⚠️ Invalid MCQ format.", "ar": "⚠️ صيغة MCQ غير صحيحة."},
+    "duplicate_options": {"en": "⚠️ Duplicate options detected in MCQ.", "ar": "⚠️ تم اكتشاف خيارات مكررة في MCQ."},
     "quiz_sent": {"en": "✅ Quiz sent!", "ar": "✅ تم إرسال الاختبار!"},
     "share_quiz": {"en": "📢 Share Quiz", "ar": "📢 مشاركة الاختبار"},
     "repost_quiz": {"en": "🔄 Repost Quiz", "ar": "🔄 إعادة نشر الاختبار"},
@@ -93,24 +126,26 @@ TEXTS = {
     "set_channel_success": {"en": "✅ Default channel: {title}", "ar": "✅ القناة الافتراضية: {title}"},
     "no_channel_selected": {"en": "❌ No channel selected.", "ar": "❌ لم يتم اختيار قناة."},
     "language_set": {"en": "🌐 Language set to {lang}.", "ar": "🌐 اللغة محددة إلى {lang}."},
-    "my_quizzes": {"en": "📚 Your quizzes:\n{quizzes}", "ar": "📚 أسئلتك:\n{quizzes}"},
+    "my_quizzes": {"en": "📚 Your quizzes (Page {page}/{total}):\n{quizzes}", "ar": "📚 أسئلتك (الصفحة {page}/{total}):\n{quizzes}"},
     "no_quizzes": {"en": "❌ No quizzes found.", "ar": "❌ لا توجد أسئلة."},
     "rate_limit": {"en": "🚫 Please wait 2 seconds before sending another quiz.", "ar": "🚫 يرجى الانتظار 2 ثانية قبل إرسال اختبار آخر."},
     "post_failed": {"en": "❌ Failed to send quiz after retries.", "ar": "❌ فشل إرسال الاختبار بعد المحاولات."},
     "not_admin": {"en": "⚠️ Bot must be an admin with posting permissions.", "ar": "⚠️ يجب أن يكون البوت مشرفًا بصلاحيات النشر."},
+    "edit_quiz_prompt": {"en": "📝 Send the updated MCQ for quiz ID: {quiz_id}", "ar": "📝 أرسل MCQ المحدث لمعرف الاختبار: {quiz_id}"},
+    "edit_quiz_success": {"en": "✅ Quiz updated successfully!", "ar": "✅ تم تحديث الاختبار بنجاح!"},
 }
 
-def get_text(key, lang, **kwargs):
+def get_text(key: str, lang: str, **kwargs) -> str:
     """Retrieve translated text with English fallback."""
     return TEXTS[key].get(lang, TEXTS[key]["en"]).format(**kwargs)
 
-async def get_db():
+async def get_db() -> aiosqlite.Connection:
     """Get singleton database connection and ensure initialization."""
     global _db_conn
     if _db_conn is None:
         try:
             _db_conn = await aiosqlite.connect(DB_PATH)
-            await init_db(_db_conn)  # Ensure tables are created before indexing
+            await init_db(_db_conn)
             await _db_conn.execute("CREATE INDEX IF NOT EXISTS idx_quiz_id ON quizzes (quiz_id)")
             await _db_conn.commit()
         except Exception as e:
@@ -118,14 +153,14 @@ async def get_db():
             raise
     return _db_conn
 
-async def close_db():
+async def close_db() -> None:
     """Close database connection."""
     global _db_conn
     if _db_conn:
         await _db_conn.close()
         _db_conn = None
 
-async def init_db(conn):
+async def init_db(conn: aiosqlite.Connection) -> None:
     """Initialize database tables."""
     try:
         await conn.execute(
@@ -138,7 +173,7 @@ async def init_db(conn):
             "CREATE TABLE IF NOT EXISTS known_channels (chat_id INTEGER PRIMARY KEY, title TEXT)"
         )
         await conn.execute(
-            "CREATE TABLE IF NOT EXISTS quizzes (quiz_id TEXT PRIMARY KEY, question TEXT, options TEXT, correct_option INTEGER, user_id INTEGER)"
+            "CREATE TABLE IF NOT EXISTS quizzes (quiz_id TEXT PRIMARY KEY, question TEXT, options TEXT, correct_option INTEGER, user_id INTEGER, explanation TEXT)"
         )
         await conn.execute(
             "CREATE TABLE IF NOT EXISTS default_channels (user_id INTEGER PRIMARY KEY, chat_id INTEGER, title TEXT)"
@@ -148,7 +183,7 @@ async def init_db(conn):
         logger.error(f"Failed to create database tables: {e}")
         raise
 
-async def schedule_cleanup():
+async def schedule_cleanup() -> None:
     """Periodically clean unused database entries and in-memory cache."""
     while True:
         try:
@@ -167,16 +202,24 @@ def escape_markdown(text: str) -> str:
     """Escape MarkdownV2 special characters."""
     return re.sub(r'([_*[\]()~`>#+\-=|{}.!])', r'\\\1', text)
 
-def parse_mcq(text: str) -> List[Tuple[str, List[str], int]]:
-    """Parse MCQ text into question, options, and correct answer index."""
+def parse_mcq(text: str) -> List[Tuple[str, List[str], int, Optional[str]]]:
+    """Parse MCQ text into question, options, correct answer index, and optional explanation."""
     res = []
     for patt in PATTERNS:
         for m in patt.finditer(text):
             q = escape_markdown(m.group("q").strip())
             raw = m.group("opts")
-            opts = [escape_markdown(opt.strip()) for opt in re.findall(r"(?:[A-Za-zأ-ل0-9١-٩]|-|\*|\d+)[).:]\s*(.+)", raw)]
-            if not (2 <= len(opts) <= 10):  # Telegram poll limits
+            expl = m.group("expl").strip() if m.group("expl") else None
+            if expl:
+                expl = escape_markdown(expl.replace("Explanation:", "").replace("تفسير:", "").strip())
+            opts = [escape_markdown(opt.strip()) for opt in re.findall(r"(?:[A-Za-zأ-ي0-9١-٩][).:]|\d+[).:]|[A-Za-zأ-ي0-9١-٩]\s+|[أ-ي]\.)\s*(.+)", raw, re.UNICODE)]
+            if not (2 <= len(opts) <= 10):
+                logger.debug(f"Invalid number of options: {len(opts)} for question: {q[:50]}...")
                 continue
+            opt_set = set(opt.lower() for opt in opts)
+            if len(opt_set) != len(opts):
+                logger.debug(f"Duplicate options detected in question: {q[:50]}...")
+                return []
             ans = m.group("ans").strip()
             idx = None
             if ans in ARABIC_DIGITS:
@@ -189,10 +232,14 @@ def parse_mcq(text: str) -> List[Tuple[str, List[str], int]]:
                 try:
                     idx = int(ans) - 1
                 except ValueError:
+                    logger.debug(f"Invalid answer format: {ans} for question: {q[:50]}...")
                     continue
             if not (0 <= idx < len(opts)):
+                logger.debug(f"Answer index out of range: {idx} for question: {q[:50]}...")
                 continue
-            res.append((q, opts, idx))
+            res.append((q, opts, idx, expl))
+    if not res:
+        logger.debug(f"No valid MCQs parsed from text: {text[:100]}...")
     return res
 
 async def build_main_menu(lang: str, state: str = "main") -> InlineKeyboardMarkup:
@@ -213,13 +260,13 @@ async def build_main_menu(lang: str, state: str = "main") -> InlineKeyboardMarku
         kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])
     return InlineKeyboardMarkup(kb)
 
-async def process_queue(chat_id: int, context: ContextTypes.DEFAULT_TYPE, user_id: int = None, is_private: bool = False, quiz_id: str = None):
+async def process_queue(chat_id: int, context: ContextTypes.DEFAULT_TYPE, user_id: int = None, is_private: bool = False, quiz_id: str = None) -> None:
     """Process send queue for a chat."""
     conn = await get_db()
     retries = defaultdict(int)
     max_retries = 3
     while send_queues[chat_id]:
-        q, opts, idx = send_queues[chat_id].popleft()
+        q, opts, idx, expl = send_queues[chat_id].popleft()
         quiz_hash = hashlib.md5((q + ':::'.join(opts)).encode()).hexdigest()
         if quiz_hash in quiz_cache[chat_id]:
             logger.debug(f"Skipped duplicate quiz in cache for chat {chat_id}: {q[:50]}...")
@@ -260,20 +307,26 @@ async def process_queue(chat_id: int, context: ContextTypes.DEFAULT_TYPE, user_i
             if not quiz_id:
                 quiz_id = quiz_hash
                 await conn.execute(
-                    "INSERT OR IGNORE INTO quizzes (quiz_id, question, options, correct_option, user_id) VALUES (?, ?, ?, ?, ?)",
-                    (quiz_id, q, ':::'.join(opts), idx, user_id),
+                    "INSERT OR IGNORE INTO quizzes (quiz_id, question, options, correct_option, user_id, explanation) VALUES (?, ?, ?, ?, ?, ?)",
+                    (quiz_id, q, ':::'.join(opts), idx, user_id, expl),
                 )
                 await conn.commit()
             lang = context.user_data.get("lang", "en")
+            bot_username = (await context.bot.get_me()).username
+            share_link = f"https://t.me/{bot_username}?start=quiz_{quiz_id}"
             keyboard = [
-                [InlineKeyboardButton(get_text("share_quiz", lang), callback_data=f"share_{quiz_id}")],
+                [InlineKeyboardButton(get_text("share_quiz", lang), url=share_link)],
                 [InlineKeyboardButton(get_text("repost_quiz", lang), callback_data=f"repost_{quiz_id}")],
             ]
+            message = get_text("quiz_sent", lang)
+            if expl:
+                message += f"\n\n**Explanation**: {expl}"
             await context.bot.send_message(
                 chat_id,
-                get_text("quiz_sent", lang),
+                message,
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 reply_to_message_id=poll.message_id,
+                parse_mode="MarkdownV2",
             )
             if is_private:
                 await conn.execute(
@@ -301,13 +354,13 @@ async def process_queue(chat_id: int, context: ContextTypes.DEFAULT_TYPE, user_i
                 await context.bot.send_message(chat_id, get_text("post_failed", lang))
                 continue
             logger.error(f"Error processing quiz (chat_id={chat_id}, user_id={user_id}): {e}")
-            send_queues[chat_id].appendleft((q, opts, idx))
+            send_queues[chat_id].appendleft((q, opts, idx, expl))
             break
 
 async def enqueue_mcq(msg: Update.message, context: ContextTypes.DEFAULT_TYPE, override: int = None, is_private: bool = False) -> bool:
     """Enqueue MCQ for processing."""
     uid = msg.from_user.id
-    lang = context.user_data.get("lang", "en")
+    lang = context.user_data.get("lang", (msg.from_user.language_code or "en")[:2])
     if time.time() - last_sent_time[uid] < 2:
         await context.bot.send_message(msg.chat.id, get_text("rate_limit", lang))
         return False
@@ -325,32 +378,77 @@ async def enqueue_mcq(msg: Update.message, context: ContextTypes.DEFAULT_TYPE, o
         return False
     blocks = [b for b in re.split(r"\n{2,}", text) if b.strip()]
     found = False
+    editing_quiz_id = context.user_data.get("editing_quiz_id")
     for blk in blocks:
-        for q, o, i in parse_mcq(blk):
+        parsed_mcqs = parse_mcq(blk)
+        if not parsed_mcqs and "Duplicate options" in blk:
+            await context.bot.send_message(cid, get_text("duplicate_options", lang))
+            return False
+        for q, o, i, expl in parsed_mcqs:
             quiz_hash = hashlib.md5((q + ':::'.join(o)).encode()).hexdigest()
             if quiz_hash in quiz_cache[cid]:
                 logger.debug(f"Skipped duplicate quiz in enqueue_mcq for chat {cid}: {q[:50]}...")
                 continue
             row = await (await conn.execute("SELECT quiz_id FROM quizzes WHERE quiz_id=?", (quiz_hash,))).fetchone()
-            if row:
+            if row and not editing_quiz_id:
                 logger.debug(f"Skipped duplicate quiz in database for chat {cid}: {q[:50]}...")
                 quiz_cache[cid].add(quiz_hash)
                 continue
-            send_queues[cid].append((q, o, i))
+            send_queues[cid].append((q, o, i, expl))
             found = True
+            if editing_quiz_id:
+                await conn.execute(
+                    "UPDATE quizzes SET question=?, options=?, correct_option=?, explanation=? WHERE quiz_id=? AND user_id=?",
+                    (q, ':::'.join(o), i, expl, editing_quiz_id, uid),
+                )
+                await conn.commit()
+                context.user_data.pop("editing_quiz_id", None)
+                await context.bot.send_message(cid, get_text("edit_quiz_success", lang))
     if found:
         context.user_data["message_to_delete"] = msg.message_id
         asyncio.create_task(process_queue(cid, context, user_id=uid, is_private=is_private))
     return found
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle incoming text messages."""
     msg = update.message
     if not msg or not (msg.text or msg.caption):
         return
     chat_type = msg.chat.type
-    lang = context.user_data.get("lang", "en")
+    lang = context.user_data.get("lang", (msg.from_user.language_code or "en")[:2])
     text = (msg.text or msg.caption or "").strip()
+
+    # Handle reply keyboard options
+    reply_keyboard_options = ["📝 New Quiz", "🔄 Publish to Channel", "📊 My Stats", "📺 Channels", "📘 Help"]
+    if text in reply_keyboard_options:
+        if text == "📝 New Quiz":
+            await update.message.reply_text(get_text("new", lang))
+            context.user_data["awaiting_mcq"] = True
+        elif text == "🔄 Publish to Channel":
+            conn = await get_db()
+            rows = await (await conn.execute("SELECT chat_id, title FROM known_channels")).fetchall()
+            if rows:
+                kb = [[InlineKeyboardButton(t, callback_data=f"choose_{cid}")] for cid, t in rows]
+                kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])
+                await update.message.reply_text("Choose a channel:", reply_markup=InlineKeyboardMarkup(kb))
+            else:
+                await update.message.reply_text(get_text("no_channels", lang))
+        elif text == "📊 My Stats":
+            uid = update.effective_user.id
+            conn = await get_db()
+            r = await (await conn.execute("SELECT sent FROM user_stats WHERE user_id=?", (uid,))).fetchone()
+            s = await (await conn.execute("SELECT SUM(sent) FROM channel_stats")).fetchone()
+            await update.message.reply_text(get_text("stats", lang, pr=r[0] if r else 0, ch=s[0] if s else 0))
+        elif text == "📺 Channels":
+            conn = await get_db()
+            rows = await (await conn.execute("SELECT chat_id, title FROM known_channels")).fetchall()
+            txt = get_text("no_channels", lang) if not rows else get_text("channels_list", lang, channels="\n".join(f"- {t}: {cid}" for cid, t in rows))
+            await update.message.reply_text(txt)
+        elif text == "📘 Help":
+            await update.message.reply_text(get_text("help", lang))
+        return
+
+    # Process as MCQ
     if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         if not parse_mcq(text):
             return
@@ -387,7 +485,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not found:
                 await context.bot.send_message(msg.chat.id, get_text("no_q", lang))
 
-async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle channel posts."""
     post = update.channel_post or update.edited_channel_post
     if not post:
@@ -413,19 +511,19 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not found:
         await context.bot.send_message(post.chat.id, get_text("no_q", "en"))
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /start command."""
-    lang = context.user_data.get("lang", update.effective_user.language_code[:2] if update.effective_user.language_code else "en")
+    lang = context.user_data.get("lang", (update.effective_user.language_code or "en")[:2])
     context.user_data["lang"] = lang
     args = context.args
     if args and args[0].startswith("quiz_"):
         quiz_id = args[0][5:]
         conn = await get_db()
-        row = await (await conn.execute("SELECT question, options, correct_option FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
+        row = await (await conn.execute("SELECT question, options, correct_option, explanation FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
         if row:
-            q, opts_str, idx = row
+            q, opts_str, idx, expl = row
             opts = opts_str.split(":::")
-            send_queues[update.effective_chat.id].append((q, opts, idx))
+            send_queues[update.effective_chat.id].append((q, opts, idx, expl))
             asyncio.create_task(process_queue(update.effective_chat.id, context, user_id=update.effective_user.id, is_private=False, quiz_id=quiz_id))
         else:
             await update.message.reply_text(get_text("no_q", lang))
@@ -440,7 +538,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text("Choose an option:", reply_markup=reply_kb)
 
-async def set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Set default channel for quizzes."""
     lang = context.user_data.get("lang", "en")
     context.user_data["lang"] = lang
@@ -455,7 +553,7 @@ async def set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Choose a default channel:", reply_markup=InlineKeyboardMarkup(kb)
     )
 
-async def repost(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def repost(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Repost a quiz by ID."""
     lang = context.user_data.get("lang", "en")
     context.user_data["lang"] = lang
@@ -464,7 +562,7 @@ async def repost(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     quiz_id = context.args[0]
     conn = await get_db()
-    row = await (await conn.execute("SELECT question, options, correct_option FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
+    row = await (await conn.execute("SELECT question, options, correct_option, explanation FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
     if not row:
         await update.message.reply_text(get_text("no_q", lang))
         return
@@ -478,7 +576,7 @@ async def repost(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Choose repost destination:", reply_markup=InlineKeyboardMarkup(kb)
     )
 
-async def language(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Set user language."""
     if not context.args or context.args[0] not in ["en", "ar"]:
         await update.message.reply_text("Usage: /language <en|ar>")
@@ -487,8 +585,8 @@ async def language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["lang"] = lang
     await update.message.reply_text(get_text("language_set", lang, lang=lang.upper()))
 
-async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List quizzes created by user."""
+async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """List quizzes created by user with pagination."""
     lang = context.user_data.get("lang", "en")
     context.user_data["lang"] = lang
     uid = update.effective_user.id
@@ -497,10 +595,42 @@ async def my_quizzes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not rows:
         await update.message.reply_text(get_text("no_quizzes", lang))
         return
-    quizzes = "\n".join(f"- {q[:50]}... (ID: {qid})" for qid, q in rows)
-    await update.message.reply_text(get_text("my_quizzes", lang, quizzes=quizzes))
+    page = int(context.args[0]) if context.args and context.args[0].isdigit() else 1
+    quizzes_per_page = 5
+    total_pages = (len(rows) + quizzes_per_page - 1) // quizzes_per_page
+    page = max(1, min(page, total_pages))
+    start_idx = (page - 1) * quizzes_per_page
+    end_idx = start_idx + quizzes_per_page
+    quizzes = "\n".join(f"- {q[:50]}... (ID: {qid})" for qid, q in rows[start_idx:end_idx])
+    kb = []
+    if page > 1:
+        kb.append([InlineKeyboardButton("⬅️ Previous", callback_data=f"quizzes_{page-1}")])
+    if page < total_pages:
+        kb.append([InlineKeyboardButton("Next ➡️", callback_data=f"quizzes_{page+1}")])
+    kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])
+    await update.message.reply_text(
+        get_text("my_quizzes", lang, page=page, total=total_pages, quizzes=quizzes),
+        reply_markup=InlineKeyboardMarkup(kb) if kb else None,
+    )
 
-async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def edit_quiz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Initiate quiz editing."""
+    lang = context.user_data.get("lang", "en")
+    context.user_data["lang"] = lang
+    if not context.args:
+        await update.message.reply_text("❌ Provide quiz ID. Example: /editquiz <quiz_id>")
+        return
+    quiz_id = context.args[0]
+    conn = await get_db()
+    row = await (await conn.execute("SELECT user_id FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
+    if not row or row[0] != update.effective_user.id:
+        await update.message.reply_text(get_text("no_quizzes", lang))
+        return
+    context.user_data["editing_quiz_id"] = quiz_id
+    context.user_data["awaiting_mcq"] = True
+    await update.message.reply_text(get_text("edit_quiz_prompt", lang, quiz_id=quiz_id))
+
+async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle callback queries."""
     cmd = update.callback_query.data
     uid = update.effective_user.id
@@ -529,6 +659,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif cmd == "main":
         txt = get_text("start", lang)
         context.user_data["awaiting_mcq"] = False
+        context.user_data.pop("editing_quiz_id", None)
     elif cmd.startswith("choose_"):
         cid = int(cmd.split("_")[1])
         row = await (await conn.execute("SELECT title FROM known_channels WHERE chat_id=?", (cid,))).fetchone()
@@ -551,7 +682,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
             txt = get_text("no_channels", lang)
     elif cmd.startswith("repost_"):
         quiz_id = cmd.split("_")[1]
-        row = await (await conn.execute("SELECT question, options, correct_option FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
+        row = await (await conn.execute("SELECT question, options, correct_option, explanation FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
         if row:
             rows = await (await conn.execute("SELECT chat_id, title FROM known_channels")).fetchall()
             if not rows:
@@ -568,15 +699,16 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif cmd.startswith("repost_to_"):
         _, quiz_id, cid = cmd.split("_", 2)
         cid = int(cid)
-        row = await (await conn.execute("SELECT question, options, correct_option FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
+        row = await (await conn.execute("SELECT question, options, correct_option, explanation FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
+ Anchors
         if row:
-            q, opts_str, idx = row
+            q, opts_str, idx, expl = row
             opts = opts_str.split(":::")
             quiz_hash = hashlib.md5((q + ':::'.join(opts)).encode()).hexdigest()
             if quiz_hash in quiz_cache[cid]:
                 txt = get_text("no_q", lang)
             else:
-                send_queues[cid].append((q, opts, idx))
+                send_queues[cid].append((q, opts, idx, expl))
                 asyncio.create_task(process_queue(cid, context, user_id=uid, is_private=False, quiz_id=quiz_id))
                 txt = get_text("quiz_sent", lang)
         else:
@@ -597,19 +729,36 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     elif cmd.startswith("share_to_"):
         _, quiz_id, cid = cmd.split("_", 2)
         cid = int(cid)
-        row = await (await conn.execute("SELECT question, options, correct_option FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
+        row = await (await conn.execute("SELECT question, options, correct_option, explanation FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
         if row:
-            q, opts_str, idx = row
+            q, opts_str, idx, expl = row
             opts = opts_str.split(":::")
             quiz_hash = hashlib.md5((q + ':::'.join(opts)).encode()).hexdigest()
             if quiz_hash in quiz_cache[cid]:
                 txt = get_text("no_q", lang)
             else:
-                send_queues[cid].append((q, opts, idx))
+                send_queues[cid].append((q, opts, idx, expl))
                 asyncio.create_task(process_queue(cid, context, user_id=uid, is_private=False, quiz_id=quiz_id))
                 txt = get_text("quiz_sent", lang)
         else:
             txt = get_text("no_q", lang)
+    elif cmd.startswith("quizzes_"):
+        page = int(cmd.split("_")[1])
+        rows = await (await conn.execute("SELECT quiz_id, question FROM quizzes WHERE user_id=?", (uid,))).fetchall()
+        quizzes_per_page = 5
+        total_pages = (len(rows) + quizzes_per_page - 1) // quizzes_per_page
+        page = max(1, min(page, total_pages))
+        start_idx = (page - 1) * quizzes_per_page
+        end_idx = start_idx + quizzes_per_page
+        quizzes = "\n".join(f"- {q[:50]}... (ID: {qid})" for qid, q in rows[start_idx:end_idx])
+        kb = []
+        if page > 1:
+            kb.append([InlineKeyboardButton("⬅️ Previous", callback_data=f"quizzes_{page-1}")])
+        if page < total_pages:
+            kb.append([InlineKeyboardButton("Next ➡️", callback_data=f"quizzes_{page+1}")])
+        kb.append([InlineKeyboardButton("❌ Cancel", callback_data="main")])
+        txt = get_text("my_quizzes", lang, page=page, total=total_pages, quizzes=quizzes)
+        reply_markup = InlineKeyboardMarkup(kb) if kb else None
     elif cmd.startswith("post_to_"):
         cid = int(cmd.split("_")[2])
         row = await (await conn.execute("SELECT title FROM known_channels WHERE chat_id=?", (cid,))).fetchone()
@@ -620,9 +769,10 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         else:
             txt = get_text("no_channels", lang)
         context.user_data["awaiting_mcq"] = False
+        context.user_data.pop("editing_quiz_id", None)
     await update.callback_query.edit_message_text(txt, reply_markup=reply_markup)
 
-async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle inline queries with spam protection."""
     if not update.inline_query.from_user:
         logger.warning("Blocked anonymous inline query")
@@ -632,11 +782,13 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.startswith("quiz_"):
         quiz_id = query[5:]
         conn = await get_db()
-        row = await (await conn.execute("SELECT question, options, correct_option FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
+        row = await (await conn.execute("SELECT question, options, correct_option, explanation FROM quizzes WHERE quiz_id=?", (quiz_id,))).fetchone()
         if row:
-            q, opts_str, idx = row
+            q, opts_str, idx, expl = row
             opts = opts_str.split(":::")
             content = f"{q}\n" + "\n".join(f"{chr(65+i)}) {opt}" for i, opt in enumerate(opts)) + f"\nAnswer: {chr(65+idx)}"
+            if expl:
+                content += f"\n\n**Explanation**: {expl}"
             results.append(
                 InlineQueryResultArticle(
                     id=quiz_id,
@@ -657,7 +809,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.warning(f"Limited inline query results for user {update.inline_query.from_user.id}")
     await update.inline_query.answer(results)
 
-async def channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /channels command."""
     lang = context.user_data.get("lang", "en")
     context.user_data["lang"] = lang
@@ -666,7 +818,7 @@ async def channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = get_text("no_channels", lang) if not rows else get_text("channels_list", lang, channels="\n".join(f"- {t}: {cid}" for cid, t in rows))
     await update.message.reply_text(txt)
 
-def main():
+def main() -> None:
     """Main entry point."""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -680,6 +832,7 @@ def main():
     app.add_handler(CommandHandler("repost", repost))
     app.add_handler(CommandHandler("language", language))
     app.add_handler(CommandHandler("myquizzes", my_quizzes))
+    app.add_handler(CommandHandler("editquiz", edit_quiz))
     app.add_handler(CallbackQueryHandler(callback_query_handler))
     app.add_handler(InlineQueryHandler(inline_query))
     app.add_handler(
