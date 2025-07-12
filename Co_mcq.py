@@ -5,6 +5,7 @@ import asyncio
 import time
 import hashlib
 from collections import defaultdict, deque
+from functools import lru_cache
 
 import aiosqlite
 from telegram import (
@@ -70,15 +71,14 @@ PATTERNS = [
 TEXTS = {
     "start": {"en": "🤖 Hi! Choose an option:", "ar": "🤖 أهلاً! اختر من القائمة:"},
     "help": {
-        "en": "🆘 Usage:\n- Send MCQ in private.\n- To publish in a channel: use 🔄 or /setchannel.\n- In groups: reply or mention @bot.\nExample:\nQ: ...\nA) ...\nB) ...\nAnswer: A",
-        "ar": "🆘 كيفية الاستخدام:\n- في الخاص: أرسل السؤال بصيغة Q:/س:.\n- للنشر في قناة: استخدم 🔄 أو /setchannel.\n- في المجموعات: رُدّ على البوت أو اذكر @البوت.\nمثال:\nس: ...\nأ) ...\nب) ...\nالإجابة: أ",
+        "en": "🆘 Usage:\n- Send MCQ in private.\n- To publish in a channel: use 🔄 or /setchannel.\n- In groups: reply or mention @bot.\nExample:\nQ: What is 2+2?\nA) 3\nB) 4\nAnswer: B",
+        "ar": "🆘 كيفية الاستخدام:\n- في الخاص: أرسل السؤال بصيغة Q:/س:.\n- للنشر في قناة: استخدم 🔄 أو /setchannel.\n- في المجموعات: رُدّ على البوت أو اذكر @البوت.\nمثال:\nس: ما هو ٢+٢؟\nأ) ٣\nب) ٤\nالإجابة: ب",
     },
     "new": {"en": "📩 Send your MCQ now!", "ar": "📩 أرسل سؤال MCQ الآن!"},
     "stats": {
         "en": "📊 Private: {pr} questions.\n🏷️ Channel: {ch} posts.",
         "ar": "📊 في الخاص: {pr} سؤال.\n🏷️ في القنوات: {ch} منشور.",
     },
-    "queue_full": {"en": "🚫 Queue full, send fewer questions.", "ar": "🚫 القائمة ممتلئة، أرسل أقل."},
     "no_q": {"en": "❌ No questions detected.", "ar": "❌ لم يتم العثور على أسئلة."},
     "invalid_format": {"en": "⚠️ Invalid format.", "ar": "⚠️ صيغة غير صحيحة."},
     "quiz_sent": {"en": "✅ Quiz sent!", "ar": "✅ تم إرسال الاختبار!"},
@@ -91,9 +91,8 @@ TEXTS = {
         "ar": "⚠️ تأكد أن البوت مشرف في القناة الخاصة.",
     },
     "set_channel_success": {"en": "✅ Default channel set: {title}", "ar": "✅ تم تعيين القناة الافتراضية: {title}"},
-    "no_channel_selected": {"en": "❌ No channel selected.", "ar": "❌ لم يتم اختيار قناة."},
     "admin_panel": {"en": "🔧 Admin Panel", "ar": "🔧 لوحة التحكم"},
-    "stats_full": {"en": "📊 Full Stats:\nUsers: {users}\nChannels: {channels}\nBanned: {banned}", "ar": "📊 إحصائيات كاملة:\nالمستخ abdمين: {users}\nالقنوات: {channels}\nالمحظورين: {banned}"},
+    "stats_full": {"en": "📊 Full Stats:\nUsers: {users}\nChannels: {channels}\nBanned: {banned}", "ar": "📊 إحصائيات كاملة:\nالمستخدمين: {users}\nالقنوات: {channels}\nالمحظورين: {banned}"},
     "download_db": {"en": "📂 Download DB", "ar": "📂 تحميل قاعدة البيانات"},
     "search_quiz": {"en": "🔎 Search Quiz", "ar": "🔎 البحث عن اختبار"},
     "ban_user": {"en": "🚫 Ban User", "ar": "🚫 حظر مستخدم"},
@@ -124,7 +123,7 @@ async def init_db(conn):
         "CREATE TABLE IF NOT EXISTS known_channels (chat_id INTEGER PRIMARY KEY, title TEXT)"
     )
     await conn.execute(
-        "CREATE TABLE IF NOT EXISTS quizzes (quiz_id TEXT PRIMARY KEY, question TEXT, options TEXT, correct_option INTEGER, user_id INTEGER)"
+        "CREATE TABLE IF NOT EXISTS quizzes (quiz_id TEXT PRIMARY KEY, question TEXT, options TEXT, correct_option INTEGER, user_id INTEGER, created_at INTEGER DEFAULT (strftime('%s', 'now')), answered_count INTEGER DEFAULT 0)"
     )
     await conn.execute(
         "CREATE TABLE IF NOT EXISTS default_channels (user_id INTEGER PRIMARY KEY, chat_id INTEGER, title TEXT)"
@@ -197,7 +196,12 @@ async def process_queue(chat_id, context, user_id=None, is_private=False, quiz_i
                     "INSERT OR IGNORE INTO quizzes (quiz_id, question, options, correct_option, user_id) VALUES (?, ?, ?, ?, ?)",
                     (quiz_id, q, ':::'.join(opts), idx, user_id),
                 )
-                await conn.commit()
+            else:
+                await conn.execute(
+                    "UPDATE quizzes SET answered_count = answered_count + 1 WHERE quiz_id = ?",
+                    (quiz_id,),
+                )
+            await conn.commit()
             lang = context.user_data.get("lang", "en")
             bot_username = (await context.bot.get_me()).username
             share_link = f"https://t.me/{bot_username}?start=quiz_{quiz_id}"
@@ -221,20 +225,22 @@ async def process_queue(chat_id, context, user_id=None, is_private=False, quiz_i
         except Exception as e:
             logger.error(f"خطأ في معالجة الاستبيان: {e}")
             send_queues[chat_id].appendleft((q, opts, idx))
+            await asyncio.sleep(1)  # تأخير قبل إعادة المحاولة
             break
 
 async def enqueue_mcq(msg, context, override=None, is_private=False):
     """إضافة MCQ إلى قائمة الانتظار للمعالجة."""
     uid = msg.from_user.id
     conn = await get_db()
+    banned = await (await conn.execute("SELECT user_id FROM banned_users WHERE user_id=?", (uid,))).fetchone()
+    if banned:
+        await msg.reply_text("🚫 أنت محظور من استخدام البوت.")
+        return False
     row = await (await conn.execute("SELECT chat_id FROM default_channels WHERE user_id=?", (uid,))).fetchone()
     default_channel = row[0] if row else None
     cid = override or context.chat_data.get("target_channel", default_channel or msg.chat.id)
     lang = (msg.from_user.language_code or "en")[:2]
     context.user_data["lang"] = lang
-    if len(send_queues[cid]) > 50:
-        await context.bot.send_message(cid, get_text("queue_full", lang))
-        return False
     text = msg.text or msg.caption or ""
     blocks = [b for b in re.split(r"\n{2,}", text) if b.strip()]
     found = False
@@ -489,18 +495,38 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.inline_query.query
     if not q:
         return
-    result = InlineQueryResultArticle(
-        id="1",
-        title="تحويل إلى MCQ",
-        input_message_content=InputTextMessageContent(q),
-    )
-    await update.inline_query.answer([result])
+    conn = await get_db()
+    results = []
+    rows = await (await conn.execute("SELECT quiz_id, question FROM quizzes WHERE question LIKE ? LIMIT 5", (f"%{q}%",))).fetchall()
+    for quiz_id, question in rows:
+        results.append(
+            InlineQueryResultArticle(
+                id=quiz_id,
+                title=question[:50] + "..." if len(question) > 50 else question,
+                input_message_content=InputTextMessageContent(f"/start quiz_{quiz_id}"),
+                description="اضغط لإرسال الاختبار",
+            )
+        )
+    if not results:
+        results.append(
+            InlineQueryResultArticle(
+                id="1",
+                title="تحويل إلى MCQ",
+                input_message_content=InputTextMessageContent(q),
+            )
+        )
+    await update.inline_query.answer(results)
+
+@lru_cache(maxsize=1)
+async def get_known_channels():
+    """استرجاع قائمة القنوات المعروفة مع تخزين مؤقت."""
+    conn = await get_db()
+    return await (await conn.execute("SELECT chat_id, title FROM known_channels")).fetchall()
 
 async def channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """معالجة أمر /channels."""
     lang = (getattr(update.effective_user, "language_code", "en") or "en")[:2]
-    conn = await get_db()
-    rows = await (await conn.execute("SELECT chat_id, title FROM known_channels")).fetchall()
+    rows = await get_known_channels()
     if not rows:
         txt = get_text("no_channels", lang)
     else:
@@ -568,6 +594,12 @@ def main():
         await init_db(conn)
         asyncio.create_task(schedule_cleanup())
     app.post_init = startup
+    async def shutdown(application):
+        global _db_conn
+        if _db_conn:
+            await _db_conn.close()
+            _db_conn = None
+    app.post_shutdown = shutdown
     logger.info("✅ البوت يعمل...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
