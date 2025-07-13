@@ -502,7 +502,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         results.append(
             InlineQueryResultArticle(
                 id=quiz_id,
-                title=question[:50] + "..." if len(question) > 50 else question,
+                title=question[:50] + "..." if len(question) > 100 else question,
                 input_message_content=InputTextMessageContent(f"/start quiz_{quiz_id}"),
                 description="اضغط لإرسال الاختبار",
             )
