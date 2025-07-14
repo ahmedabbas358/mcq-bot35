@@ -26,6 +26,7 @@ from telegram.ext import (
     ContextTypes,
 )
 from telegram.constants import ChatType
+from telegram.error import TelegramError
 
 # إعداد اللوجر
 logging.basicConfig(
@@ -98,6 +99,7 @@ TEXTS = {
     "ban_user": {"en": "🚫 Ban User", "ar": "🚫 حظر مستخدم"},
     "unban_user": {"en": "✅ Unban User", "ar": "✅ رفع الحظر"},
     "backup_db": {"en": "📦 Backup DB", "ar": "📦 نسخة احتياطية"},
+    "permission_error": {"en": "❌ Bot lacks permission to send polls in this chat.", "ar": "❌ البوت ليس لديه الصلاحية لإرسال استبيانات في هذه الدردشة."},
 }
 
 def get_text(key, lang, **kwargs):
@@ -222,10 +224,14 @@ async def process_queue(chat_id, context, user_id=None, is_private=False, quiz_i
                 await conn.execute("INSERT OR IGNORE INTO channel_stats(chat_id, sent) VALUES (?, 0)", (chat_id,))
                 await conn.execute("UPDATE channel_stats SET sent = sent + 1 WHERE chat_id = ?", (chat_id,))
             await conn.commit()
-        except Exception as e:
-            logger.error(f"خطأ في معالجة الاستبيان: {e}")
-            send_queues[chat_id].appendleft((q, opts, idx))
-            await asyncio.sleep(1)  # تأخير قبل إعادة المحاولة
+        except TelegramError as e:
+            if "can't send polls" in str(e).lower():
+                lang = context.user_data.get("lang", "en")
+                await context.bot.send_message(chat_id, get_text("permission_error", lang))
+            else:
+                logger.error(f"خطأ في معالجة الاستبيان: {e}")
+                send_queues[chat_id].appendleft((q, opts, idx))
+                await asyncio.sleep(1)  # تأخير قبل إعادة المحاولة
             break
 
 async def enqueue_mcq(msg, context, override=None, is_private=False):
@@ -471,7 +477,11 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
             banned = await (await conn.execute("SELECT COUNT(*) FROM banned_users")).fetchone()
             txt = get_text("stats_full", lang, users=users[0], channels=channels[0], banned=banned[0])
         elif cmd == "admin_download_db":
+            await conn.commit()
+            await conn.close()
             await context.bot.send_document(chat_id=update.effective_chat.id, document=open(DB_PATH, 'rb'), filename="stats.db")
+            global _db_conn
+            _db_conn = await aiosqlite.connect(DB_PATH)  # إعادة فتح الاتصال
             return
         elif cmd == "admin_search_quiz":
             await update.callback_query.edit_message_text("🔎 أرسل معرف الاختبار للبحث عنه.")
@@ -486,7 +496,11 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
             context.user_data["admin_action"] = "unban_user"
             return
         elif cmd == "admin_backup_db":
+            await conn.commit()
+            await conn.close()
             await context.bot.send_document(chat_id=update.effective_chat.id, document=open(DB_PATH, 'rb'), filename="stats_backup.db")
+            global _db_conn
+            _db_conn = await aiosqlite.connect(DB_PATH)  # إعادة فتح الاتصال
             return
     await update.callback_query.edit_message_text(txt)
 
