@@ -6,7 +6,8 @@ import time
 import hashlib
 from collections import defaultdict, deque
 from functools import lru_cache
-
+import threading
+import socket
 import aiosqlite
 from telegram import (
     Update,
@@ -573,8 +574,18 @@ async def admin_action_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await msg.reply_text(txt)
     context.user_data.pop("admin_action", None)
 
-def main():
+def main():.  
     """نقطة الدخول الرئيسية للبوت."""
+    
+def keep_alive_dummy_server():
+    sock = socket.socket()
+    sock.bind(("0.0.0.0", 8080))
+    sock.listen(1)
+    while True:
+        conn, addr = sock.accept()
+        conn.close()
+
+threading.Thread(target=keep_alive_dummy_server, daemon=True).start()
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         raise RuntimeError("❌ لم يتم العثور على رمز البوت. قم بتعيين متغير البيئة TELEGRAM_BOT_TOKEN.")
