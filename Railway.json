@@ -1,0 +1,11 @@
+{
+  "build": {
+    "env": {
+      "TELEGRAM_BOT_TOKEN": "7966858161:AAHxr_eEfjhdsVtLczdPEIUJ7W_4ShoykYo"
+    },
+    "command": "pip install -r requirements.txt"
+  },
+  "start": {
+    "command": "python bot.py"
+  }
+}
