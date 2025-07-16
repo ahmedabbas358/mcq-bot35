@@ -577,13 +577,13 @@ async def admin_action_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 def main():
     """نقطة الدخول الرئيسية للبوت."""
     
-def keep_alive_dummy_server():
-    sock = socket.socket()
-    sock.bind(("0.0.0.0", 8080))
-    sock.listen(1)
-    while True:
-        conn, addr = sock.accept()
-        conn.close()
+    def keep_alive_dummy_server():
+         sock = socket.socket()
+         sock.bind(("0.0.0.0", 8080))
+         sock.listen(1)
+         while True:
+             conn, addr = sock.accept()
+             conn.close()
 
 threading.Thread(target=keep_alive_dummy_server, daemon=True).start()
     token = os.getenv("TELEGRAM_BOT_TOKEN")
