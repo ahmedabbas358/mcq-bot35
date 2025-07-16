@@ -574,7 +574,7 @@ async def admin_action_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await msg.reply_text(txt)
     context.user_data.pop("admin_action", None)
 
-def main():.  
+def main():
     """نقطة الدخول الرئيسية للبوت."""
     
 def keep_alive_dummy_server():
