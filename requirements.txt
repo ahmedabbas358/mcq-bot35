@@ -1,4 +1,3 @@
-telegram
-python-dotenv
-aiosqlite
-quart 
+python-telegram-bot==20.7
+aiosqlite 
+async_lru 
