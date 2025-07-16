@@ -6,6 +6,6 @@
     "command": "pip install -r requirements.txt"
   },
   "start": {
-    "command": "Co_mcq.py "
+    "command": "Co_mcq.py"
   }
 }
