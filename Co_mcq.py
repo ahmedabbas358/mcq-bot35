@@ -6,8 +6,7 @@ import time
 import hashlib
 from collections import defaultdict, deque
 from functools import lru_cache
-import threading
-import socket
+
 import aiosqlite
 from telegram import (
     Update,
@@ -574,29 +573,12 @@ async def admin_action_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await msg.reply_text(txt)
     context.user_data.pop("admin_action", None)
 
-# ... existing code above ...
-
 def main():
     """نقطة الدخول الرئيسية للبوت."""
-    
-    def keep_alive_dummy_server():
-        sock = socket.socket()
-        sock.bind(("0.0.0.0", 8080))
-        sock.listen(1)
-        while True:
-            conn, addr = sock.accept()
-            conn.close()
-
-    # Start keep-alive server in a separate thread
-    threading.Thread(target=keep_alive_dummy_server, daemon=True).start()
-
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         raise RuntimeError("❌ لم يتم العثور على رمز البوت. قم بتعيين متغير البيئة TELEGRAM_BOT_TOKEN.")
-    
     app = Application.builder().token(token).build()
-    
-    # Add handlers
     app.add_handler(CommandHandler(["start", "help"], start))
     app.add_handler(CommandHandler("channels", channels_command))
     app.add_handler(CommandHandler("setchannel", set_channel))
@@ -607,28 +589,19 @@ def main():
     app.add_handler(MessageHandler(filters.ChatType.CHANNEL & (filters.TEXT | filters.Caption), handle_channel_post))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.TEXT & filters.User(ADMIN_ID), admin_action_handler))
-
-    # Database initialization and cleanup task
     async def startup(application):
         conn = await get_db()
         await init_db(conn)
         asyncio.create_task(schedule_cleanup())
-    
-    # Database shutdown
+    app.post_init = startup
     async def shutdown(application):
         global _db_conn
         if _db_conn:
             await _db_conn.close()
             _db_conn = None
-    
-    app.add_handler(MessageHandler(filters.TEXT & filters.User(ADMIN_ID), admin_action_handler))
-    
-    # Set startup/shutdown hooks
-    app.post_init = startup
     app.post_shutdown = shutdown
-    
     logger.info("✅ البوت يعمل...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    main() 
+    main()
