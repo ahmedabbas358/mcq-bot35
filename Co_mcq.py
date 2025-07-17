@@ -49,25 +49,6 @@ EN_LETTERS = {chr(ord("A") + i): i for i in range(10)}
 EN_LETTERS.update({chr(ord("a") + i): i for i in range(10)})
 AR_LETTERS = {"أ": 0, "ب": 1, "ج": 2, "د": 3, "هـ": 4, "و": 5, "ز": 6, "ح": 7, "ط": 8, "ي": 9}
 
-# أنماط regex لتحليل الأسئلة
-PATTERNS = [
-    re.compile(
-        r"Q[.:)]?\s*(?P<q>.+?)\s*(?P<opts>(?:[A-J1-9][).:]\s*.+?(?:\n|$)){2,10})"
-        r"(?:Answer|Ans|Correct Answer)[:：]?\s*(?P<ans>[A-Ja-j0-9])",
-        re.S,
-    ),
-    re.compile(
-        r"س[.:)]?\s*(?P<q>.+?)\s*(?P<opts>(?:[أ-ي١-٩][).:]\s*.+?(?:\n|$)){2,10})"
-        r"الإجابة\s+الصحيحة[:：]?\s*(?P<ans>[أ-ي١-٩])",
-        re.S,
-    ),
-    re.compile(
-        r"(?P<q>.+?)\n(?P<opts>(?:\s*[A-Za-zء-ي0-9][).:]\s*.+?(?:\n|$)){2,10})"
-        r"(?:Answer|Ans|الإجابة|Correct Answer)[:：]?\s*(?P<ans>[A-Za-zء-ي0-9])",
-        re.S,
-    ),
-]
-
 # الرسائل المترجمة
 TEXTS = {
     "start": {"en": "🤖 Hi! Choose an option:", "ar": "🤖 أهلاً! اختر من القائمة:"},
@@ -148,93 +129,134 @@ async def cleanup_db():
 
 def parse_mcq(text):
     """Parse MCQ text into question, options, and correct answer index."""
-    res = []
-    for patt in PATTERNS:
-        for m in patt.finditer(text):
-            q = m.group("q").strip()
-            raw = m.group("opts")
-            opts = re.findall(r"[A-Za-zأ-ي0-9][).:]\s*(.+)", raw)
-            ans = m.group("ans").strip()
-            if ans in ARABIC_DIGITS:
-                ans = ARABIC_DIGITS[ans]
-            idx = EN_LETTERS.get(ans) or AR_LETTERS.get(ans)
-            if idx is None:
-                try:
-                    idx = int(ans) - 1
-                except ValueError:
-                    continue
-            if not (0 <= idx < len(opts)):
+    patterns = [
+        # النمط الإنجليزي المحسن
+        re.compile(
+            r"(?:Q|Question|سؤال)[.:)\s]*(?P<q>.+?)\s*"
+            r"(?P<opts>(?:[A-Za-z][).\s]+\s*.+?(?:\n|$)){2,10}"
+            r"(?:Answer|الإجابة|Correct\s*Answer)[:\s]*(?P<ans>[A-Za-z])",
+            re.IGNORECASE | re.DOTALL
+        ),
+        # النمط العربي المحسن
+        re.compile(
+            r"(?:س|سؤال)[.:)\s]*(?P<q>.+?)\s*"
+            r"(?P<opts>(?:[أ-ي][).\s]+\s*.+?(?:\n|$)){2,10}"
+            r"(?:الإجابة|الجواب|الإجابة\s*الصحيحة)[:\s]*(?P<ans>[أ-ي])",
+            re.DOTALL
+        ),
+        # نمط الأرقام
+        re.compile(
+            r"(?:Q|س)[.:)\s]*(?P<q>.+?)\s*"
+            r"(?P<opts>(?:\d+[).\s]+\s*.+?(?:\n|$)){2,10}"
+            r"(?:Answer|الإجابة)[:\s]*(?P<ans>\d+)",
+            re.IGNORECASE | re.DOTALL
+        )
+    ]
+    
+    results = []
+    for pattern in patterns:
+        for match in pattern.finditer(text):
+            question = match.group("q").strip()
+            options_text = match.group("opts")
+            
+            # استخراج الخيارات مع تحسين التعامل مع المسافات
+            options = [
+                opt.strip() 
+                for opt in re.findall(
+                    r"[A-Za-zأ-ي0-9][).\s]+\s*(.+?)(?=\n|$)", 
+                    options_text, 
+                    re.DOTALL
+                )
+            ]
+            
+            answer = match.group("ans").strip().upper()
+            
+            # تحويل الإجابة إلى رقم مؤشر
+            if answer.isdigit():
+                idx = int(answer) - 1
+            elif answer in EN_LETTERS:
+                idx = EN_LETTERS[answer]
+            elif answer in AR_LETTERS:
+                idx = AR_LETTERS[answer]
+            else:
                 continue
-            res.append((q, opts, idx))
-    return res
+                
+            if 0 <= idx < len(options):
+                results.append((question, options, idx))
+    
+    return results
 
-async def send_quiz(chat_id, context, q, opts, idx, quiz_id=None, user_id=None, is_private=False):
+async def send_quiz(chat_id, context, question, options, correct_idx, quiz_id=None, user_id=None, is_private=False):
     """Send a quiz and handle database operations."""
     try:
-        # Send the poll
+        if not quiz_id:
+            quiz_id = hashlib.md5(
+                (question + ':::' + ':::'.join(options)).encode()).hexdigest()
+        
+        # إرسال الاستطلاع
         poll = await context.bot.send_poll(
-            chat_id,
-            q,
-            opts,
+            chat_id=chat_id,
+            question=question,
+            options=options,
             type=Poll.QUIZ,
-            correct_option_id=idx,
+            correct_option_id=correct_idx,
             is_anonymous=False,
+            explanation="تم إنشاء هذا السؤال بواسطة بوت MCQ"
         )
         
-        # Generate quiz ID if not provided
-        if not quiz_id:
-            quiz_id = hashlib.md5((q + ':::'.join(opts)).encode()).hexdigest()
-        
-        # Save to database
+        # حفظ في قاعدة البيانات
         async with await get_db() as conn:
             await conn.execute(
-                "INSERT OR IGNORE INTO quizzes (quiz_id, question, options, correct_option, user_id) VALUES (?, ?, ?, ?, ?)",
-                (quiz_id, q, ':::'.join(opts), idx, user_id),
+                """INSERT OR REPLACE INTO quizzes 
+                (quiz_id, question, options, correct_option, user_id)
+                VALUES (?, ?, ?, ?, ?)""",
+                (quiz_id, question, ':::'.join(options), correct_idx, user_id)
             )
             await conn.commit()
         
-        # Create inline buttons
+        # تحديث الإحصائيات
+        table = "user_stats" if is_private else "channel_stats"
+        async with await get_db() as conn:
+            await conn.execute(
+                f"""INSERT OR IGNORE INTO {table} 
+                ({'user_id' if is_private else 'chat_id'}, sent) 
+                VALUES (?, 0)""",
+                (user_id if is_private else chat_id,)
+            )
+            await conn.execute(
+                f"UPDATE {table} SET sent = sent + 1 WHERE "
+                f"{'user_id' if is_private else 'chat_id'} = ?",
+                (user_id if is_private else chat_id,)
+            )
+            await conn.commit()
+        
+        # إعداد أزرار المشاركة
         lang = context.user_data.get("lang", "en")
         bot_username = (await context.bot.get_me()).username
-        share_link = f"https://t.me/{bot_username}?start=quiz_{quiz_id}"
+        share_url = f"https://t.me/{bot_username}?start=quiz_{quiz_id}"
+        
         keyboard = [
-            [InlineKeyboardButton(get_text("share_quiz", lang), url=share_link)],
-            [InlineKeyboardButton(get_text("repost_quiz", lang), callback_data=f"repost_{quiz_id}")]
+            [InlineKeyboardButton(
+                get_text("share_quiz", lang), 
+                url=share_url
+            )],
+            [InlineKeyboardButton(
+                get_text("repost_quiz", lang),
+                callback_data=f"repost_{quiz_id}"
+            )]
         ]
         
-        # Send confirmation message
+        # إرسال رسالة التأكيد
         await context.bot.send_message(
-            chat_id,
-            get_text("quiz_sent", lang),
+            chat_id=chat_id,
+            text=get_text("quiz_sent", lang),
             reply_markup=InlineKeyboardMarkup(keyboard),
             reply_to_message_id=poll.message_id
         )
         
-        # Update stats
-        async with await get_db() as conn:
-            if is_private:
-                await conn.execute(
-                    "INSERT OR IGNORE INTO user_stats(user_id, sent) VALUES (?, 0)",
-                    (user_id,),
-                )
-                await conn.execute(
-                    "UPDATE user_stats SET sent = sent + 1 WHERE user_id = ?",
-                    (user_id,),
-                )
-            else:
-                await conn.execute(
-                    "INSERT OR IGNORE INTO channel_stats(chat_id, sent) VALUES (?, 0)",
-                    (chat_id,),
-                )
-                await conn.execute(
-                    "UPDATE channel_stats SET sent = sent + 1 WHERE chat_id = ?",
-                    (chat_id,),
-                )
-            await conn.commit()
-        
         return True
     except Exception as e:
-        logger.error(f"Error sending quiz: {e}")
+        logger.error(f"Error sending quiz: {str(e)}")
         return False
 
 async def process_queue(chat_id, context, user_id=None, is_private=False):
@@ -276,36 +298,61 @@ async def process_queue(chat_id, context, user_id=None, is_private=False):
 
 async def enqueue_mcq(msg, context, override=None, is_private=False):
     """Enqueue an MCQ for processing."""
-    uid = msg.from_user.id
-    lang = (msg.from_user.language_code or "en")[:2]
-    context.user_data["lang"] = lang
-    
-    # Check for default channel
-    async with await get_db() as conn:
-        row = await (await conn.execute("SELECT chat_id FROM default_channels WHERE user_id=?", (uid,))).fetchone()
-    default_channel = row[0] if row else None
-    
-    cid = override or context.chat_data.get("target_channel", default_channel or msg.chat.id)
-    
-    # Check queue size
-    if len(send_queues[cid]) >= MAX_QUEUE_SIZE:
-        await context.bot.send_message(cid, get_text("queue_full", lang))
+    try:
+        uid = msg.from_user.id
+        lang = (msg.from_user.language_code or "en")[:2]
+        context.user_data["lang"] = lang
+        
+        # الحصول على القناة الافتراضية
+        async with await get_db() as conn:
+            row = await conn.execute_fetchone(
+                "SELECT chat_id FROM default_channels WHERE user_id=?",
+                (uid,))
+        default_channel = row[0] if row else None
+        
+        cid = override or context.chat_data.get("target_channel", default_channel or msg.chat.id)
+        
+        # التحقق من حجم الطابور
+        if len(send_queues[cid]) >= MAX_QUEUE_SIZE:
+            await context.bot.send_message(
+                msg.chat.id, 
+                get_text("queue_full", lang)
+            )
+            return False
+        
+        text = msg.text or msg.caption or ""
+        
+        # تقسيم النص إلى كتل (أسئلة منفصلة)
+        blocks = [b.strip() for b in re.split(r"\n{2,}", text) if b.strip()]
+        found = False
+        
+        for block in blocks:
+            # معالجة كل كتلة كمستند MCQ منفصل
+            for question, options, correct_idx in parse_mcq(block):
+                quiz_id = hashlib.md5(
+                    (question + ':::' + ':::'.join(options)).encode()).hexdigest()
+                
+                send_queues[cid].append(
+                    (question, options, correct_idx, quiz_id, msg.message_id)
+                )
+                found = True
+        
+        if found:
+            await process_queue(cid, context, 
+                              user_id=uid, 
+                              is_private=is_private)
+            return True
+        
+        if not found and is_private:
+            await context.bot.send_message(
+                msg.chat.id, 
+                get_text("no_q", lang)
+            )
+        return found
+        
+    except Exception as e:
+        logger.error(f"Error in enqueue_mcq: {e}")
         return False
-    
-    text = msg.text or msg.caption or ""
-    blocks = [b for b in re.split(r"\n{2,}", text) if b.strip()]
-    found = False
-    
-    for blk in blocks:
-        for q, o, i in parse_mcq(blk):
-            quiz_id = hashlib.md5((q + ':::'.join(o)).encode()).hexdigest()
-            send_queues[cid].append((q, o, i, quiz_id, msg.message_id))
-            found = True
-    
-    if found:
-        await process_queue(cid, context, user_id=msg.from_user.id, is_private=is_private)
-    
-    return found
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming text messages."""
@@ -314,33 +361,36 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not msg or not (msg.text or msg.caption):
             return
         
+        # منع التكرار السريع
         uid = msg.from_user.id
-        if time.time() - last_sent_time[uid] < 3:
+        current_time = time.time()
+        if current_time - last_sent_time.get(uid, 0) < 3:
             return
-        last_sent_time[uid] = time.time()
+        last_sent_time[uid] = current_time
 
         chat_type = msg.chat.type
         if chat_type == ChatType.PRIVATE:
-            found = await enqueue_mcq(msg, context, is_private=True)
-            if not found:
-                lang = (msg.from_user.language_code or "en")[:2]
-                await context.bot.send_message(msg.chat.id, get_text("no_q", lang))
+            await enqueue_mcq(msg, context, is_private=True)
             return
 
+        # للمجموعات: التأكد من أن الرسالة موجهة للبوت
         content = (msg.text or msg.caption or "").lower()
         bot_username = (await context.bot.get_me()).username.lower()
         
-        if chat_type in ["group", "supergroup"]:
-            if (
-                (msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id)
-                or content.strip().startswith(f"@{bot_username}")
-            ):
-                found = await enqueue_mcq(msg, context, is_private=False)
-                if not found:
-                    lang = (msg.from_user.language_code or "en")[:2]
-                    await context.bot.send_message(msg.chat.id, get_text("no_q", lang))
+        if chat_type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+            is_reply_to_bot = (
+                msg.reply_to_message and 
+                msg.reply_to_message.from_user.id == context.bot.id
+            )
+            is_mention = f"@{bot_username}" in content
+            
+            if is_reply_to_bot or is_mention:
+                await enqueue_mcq(msg, context, is_private=False)
+                
     except Exception as e:
         logger.error(f"Error in handle_text: {e}")
+        lang = (update.effective_user.language_code or "en")[:2]
+        await update.message.reply_text(get_text("invalid_format", lang))
 
 async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle channel posts."""
@@ -599,7 +649,7 @@ async def health_check(context: ContextTypes.DEFAULT_TYPE):
 
 async def init_app(application: Application):
     """Initialize the application on startup."""
-    if hasattr(application, '_initialized') and application._initialized:
+    if getattr(application, "_initialized", False):
         return
     
     try:
@@ -609,12 +659,26 @@ async def init_app(application: Application):
         async with application:
             await application.bot.delete_webhook(drop_pending_updates=True)
         
-        # Start cleanup task if not already running
+        # Add all handlers
+        application.add_handler(CommandHandler(["start", "help"], start))
+        application.add_handler(CommandHandler("channels", channels_command))
+        application.add_handler(CommandHandler("setchannel", set_channel))
+        application.add_handler(CommandHandler("repost", repost))
+        application.add_handler(CallbackQueryHandler(callback_query_handler))
+        application.add_handler(InlineQueryHandler(inline_query))
+        application.add_handler(MessageHandler(
+            filters.ChatType.CHANNEL & (filters.TEXT | filters.Caption),
+            handle_channel_post,
+        ))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+        # Start background tasks
         if 'cleanup' not in _active_tasks or _active_tasks['cleanup'].done():
             _active_tasks['cleanup'] = asyncio.create_task(periodic_cleanup(application))
         
         await health_check(application)
         application._initialized = True
+        logger.info("✅ Application fully initialized")
     except Exception as e:
         logger.error(f"Application initialization failed: {e}")
         raise
@@ -638,6 +702,8 @@ def main():
         logger.error("⚠️ البوت يعمل بالفعل! لا يمكن تشغيل نسخة ثانية.")
         return
 
+    application = None
+
     try:
         token = os.getenv("TELEGRAM_BOT_TOKEN")
         if not token:
@@ -653,36 +719,19 @@ def main():
             .build()
         )
         
-        # Add handlers
-        handlers = [
-            CommandHandler(["start", "help"], start),
-            CommandHandler("channels", channels_command),
-            CommandHandler("setchannel", set_channel),
-            CommandHandler("repost", repost),
-            CallbackQueryHandler(callback_query_handler),
-            InlineQueryHandler(inline_query),
-            MessageHandler(
-                filters.ChatType.CHANNEL & (filters.TEXT | filters.Caption),
-                handle_channel_post,
-            ),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
-        ]
-        
-        for handler in handlers:
-            application.add_handler(handler)
-        
-        # Start the bot
+        # Start the bot AFTER handlers and setup are complete
         application.run_polling(
             drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES,
             close_loop=False,
         )
+
     except Exception as e:
         logger.critical(f"Fatal error: {e}")
     finally:
         bot_lock.release()
-        # Final cleanup
-        asyncio.get_event_loop().run_until_complete(cleanup_on_shutdown(application))
+        if application:
+            asyncio.get_event_loop().run_until_complete(cleanup_on_shutdown(application))
 
 if __name__ == "__main__":
     main()
