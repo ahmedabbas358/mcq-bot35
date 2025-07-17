@@ -25,6 +25,8 @@ from telegram.ext import (
     ContextTypes,
 )
 from telegram.constants import ChatType
+from keep_alive import keep_alive
+keep_alive()
 
 # إعداد اللوجر
 logging.basicConfig(
