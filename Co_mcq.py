@@ -23,7 +23,6 @@ from telegram.ext import (
     InlineQueryHandler,
     filters,
     ContextTypes,
-    JobQueue,
 )
 from telegram.constants import ChatType
 
@@ -92,6 +91,14 @@ TEXTS = {
     },
     "set_channel_success": {"en": "✅ Default channel set: {title}", "ar": "✅ تم تعيين القناة الافتراضية: {title}"},
     "no_channel_selected": {"en": "❌ No channel selected.", "ar": "❌ لم يتم اختيار قناة."},
+    "health_check": {
+        "en": "🟢 Bot is running!\nStart time: {start_time}",
+        "ar": "🟢 البوت يعمل الآن!\nوقت البدء: {start_time}"
+    },
+    "bot_restarted": {
+        "en": "🔵 Bot restarted successfully!\nRestart time: {restart_time}",
+        "ar": "🔵 تم إعادة تشغيل البوت بنجاح!\nوقت إعادة التشغيل: {restart_time}"
+    }
 }
 
 def get_text(key, lang, **kwargs):
@@ -121,6 +128,7 @@ async def init_db():
             "CREATE TABLE IF NOT EXISTS default_channels (user_id INTEGER PRIMARY KEY, chat_id INTEGER, title TEXT)"
         )
         await conn.commit()
+    logger.info("✅ Database initialized successfully")
 
 async def cleanup_db():
     """Clean up unused database entries."""
@@ -567,46 +575,77 @@ async def periodic_cleanup(context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Periodic cleanup error: {e}")
             await asyncio.sleep(3600)  # انتظر ساعة قبل إعادة المحاولة
 
+async def health_check(context: ContextTypes.DEFAULT_TYPE):
+    """Send health status message on startup."""
+    try:
+        me = await context.bot.get_me()
+        logger.info(f"✅ Bot is running: {me.username}")
+        
+        # Send message to developer if specified
+        developer_id = os.getenv("DEVELOPER_ID")
+        if developer_id:
+            current_time = time.strftime("%Y-%m-%d %H:%M:%S")
+            lang = "ar"  # Default to Arabic
+            await context.bot.send_message(
+                chat_id=developer_id,
+                text=get_text("health_check", lang, start_time=current_time)
+            )
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+
+async def init_app(application: Application):
+    """Initialize the application on startup."""
+    try:
+        await init_db()
+        asyncio.create_task(periodic_cleanup(application))
+        
+        # Send health check after 5 seconds
+        await asyncio.sleep(5)
+        await health_check(application)
+    except Exception as e:
+        logger.error(f"Application initialization failed: {e}")
+
 def main():
     """Main entry point for the bot."""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token:
         raise RuntimeError("❌ Bot token not found. Set TELEGRAM_BOT_TOKEN environment variable.")
     
-    # إنشاء التطبيق
-    application = Application.builder().token(token).build()
+    # Create application with post_init
+    application = (
+        Application.builder()
+        .token(token)
+        .post_init(init_app)
+        .build()
+    )
     
-    # إضافة المعالجات
-    application.add_handler(CommandHandler(["start", "help"], start))
-    application.add_handler(CommandHandler("channels", channels_command))
-    application.add_handler(CommandHandler("setchannel", set_channel))
-    application.add_handler(CommandHandler("repost", repost))
-    application.add_handler(CallbackQueryHandler(callback_query_handler))
-    application.add_handler(InlineQueryHandler(inline_query))
-    application.add_handler(
+    # Add handlers
+    handlers = [
+        CommandHandler(["start", "help"], start),
+        CommandHandler("channels", channels_command),
+        CommandHandler("setchannel", set_channel),
+        CommandHandler("repost", repost),
+        CallbackQueryHandler(callback_query_handler),
+        InlineQueryHandler(inline_query),
         MessageHandler(
             filters.ChatType.CHANNEL & (filters.TEXT | filters.Caption),
             handle_channel_post,
-        )
-    )
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+        ),
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
+    ]
     
-    # تهيئة قاعدة البيانات
-    async def init_app(application):
-        await init_db()
-        # بدء مهمة التنظيف الدورية
-        asyncio.create_task(periodic_cleanup(application))
+    for handler in handlers:
+        application.add_handler(handler)
     
-    # بدء البوت
+    # Start the bot
     application.run_polling(
         drop_pending_updates=True,
-        on_start=init_app,
-        allowed_updates=Update.ALL_TYPES
+        allowed_updates=Update.ALL_TYPES,
     )
 
 if __name__ == "__main__":
-    # بدء التطبيق
     try:
         main()
     except Exception as e:
         logger.critical(f"Fatal error: {e}")
+        raise
