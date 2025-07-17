@@ -2,3 +2,4 @@ python-telegram-bot==20.7
 aiosqlite 
 async_lru 
 Quart
+uvicorn==0.29.0
