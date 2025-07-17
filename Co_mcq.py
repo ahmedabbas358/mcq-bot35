@@ -4,6 +4,7 @@ import logging
 import asyncio
 import time
 import hashlib
+import threading
 from collections import defaultdict, deque
 
 import aiosqlite
@@ -39,6 +40,7 @@ send_queues = defaultdict(deque)
 last_sent_time = defaultdict(float)
 MAX_QUEUE_SIZE = 50
 _active_tasks = {}  # لتتبع المهام النشطة
+bot_lock = threading.Lock()  # لمنع التشغيل المزدوج
 
 # دعم الأرقام والحروف
 ARABIC_DIGITS = {"٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4", "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9"}
@@ -412,8 +414,7 @@ async def set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton(t, callback_data=f"set_default_{cid}")] for cid, t in rows]
         await update.message.reply_text(
             "اختر قناة لتعيينها كافتراضية:", 
-            reply_markup=InlineKeyboardMarkup(kb)
-        )
+            reply_markup=InlineKeyboardMarkup(kb))
     except Exception as e:
         logger.error(f"Error in set_channel: {e}")
 
@@ -443,8 +444,7 @@ async def repost(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kb = [[InlineKeyboardButton(t, callback_data=f"repost_to_{quiz_id}_{cid}")] for cid, t in rows]
         await update.message.reply_text(
             "اختر مكانًا لإعادة النشر:", 
-            reply_markup=InlineKeyboardMarkup(kb)
-        )
+            reply_markup=InlineKeyboardMarkup(kb))
     except Exception as e:
         logger.error(f"Error in repost: {e}")
 
@@ -481,8 +481,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
                 return
             kb = [[InlineKeyboardButton(t, callback_data=f"choose_{cid}")] for cid, t in rows]
             await update.callback_query.edit_message_text(
-                "اختر قناة:", reply_markup=InlineKeyboardMarkup(kb)
-            )
+                "اختر قناة:", reply_markup=InlineKeyboardMarkup(kb))
             return
         elif cmd.startswith("choose_"):
             cid = int(cmd.split("_")[1])
@@ -516,8 +515,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
             if row and rows:
                 kb = [[InlineKeyboardButton(t, callback_data=f"repost_to_{quiz_id}_{cid}")] for cid, t in rows]
                 await update.callback_query.edit_message_text(
-                    "اختر مكانًا لإعادة النشر:", reply_markup=InlineKeyboardMarkup(kb)
-                )
+                    "اختر مكانًا لإعادة النشر:", reply_markup=InlineKeyboardMarkup(kb))
                 return
             else:
                 txt = get_text("no_q", lang)
@@ -601,19 +599,25 @@ async def health_check(context: ContextTypes.DEFAULT_TYPE):
 
 async def init_app(application: Application):
     """Initialize the application on startup."""
+    if hasattr(application, '_initialized') and application._initialized:
+        return
+    
     try:
         await init_db()
         
-        # التحقق من عدم وجود مهمة تنظيف نشطة بالفعل
-        if 'cleanup' not in _active_tasks or _active_tasks['cleanup'].done():
-            _active_tasks['cleanup'] = asyncio.create_task(
-                periodic_cleanup(application)
-            )
+        # Delete any existing webhook
+        async with application:
+            await application.bot.delete_webhook(drop_pending_updates=True)
         
-        await asyncio.sleep(5)
+        # Start cleanup task if not already running
+        if 'cleanup' not in _active_tasks or _active_tasks['cleanup'].done():
+            _active_tasks['cleanup'] = asyncio.create_task(periodic_cleanup(application))
+        
         await health_check(application)
+        application._initialized = True
     except Exception as e:
         logger.error(f"Application initialization failed: {e}")
+        raise
 
 async def cleanup_on_shutdown(application: Application):
     """Cleanup tasks on shutdown."""
@@ -630,50 +634,55 @@ async def cleanup_on_shutdown(application: Application):
 
 def main():
     """Main entry point for the bot."""
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not token:
-        raise RuntimeError("❌ Bot token not found. Set TELEGRAM_BOT_TOKEN environment variable.")
-    
-    # Create application with post_init and shutdown handlers
-    application = (
-        Application.builder()
-        .token(token)
-        .post_init(init_app)
-        .post_shutdown(cleanup_on_shutdown)
-        .build()
-    )
-    
-    # Add handlers
-    handlers = [
-        CommandHandler(["start", "help"], start),
-        CommandHandler("channels", channels_command),
-        CommandHandler("setchannel", set_channel),
-        CommandHandler("repost", repost),
-        CallbackQueryHandler(callback_query_handler),
-        InlineQueryHandler(inline_query),
-        MessageHandler(
-            filters.ChatType.CHANNEL & (filters.TEXT | filters.Caption),
-            handle_channel_post,
-        ),
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
-    ]
-    
-    for handler in handlers:
-        application.add_handler(handler)
-    
-    # Start the bot
+    if not bot_lock.acquire(blocking=False):
+        logger.error("⚠️ البوت يعمل بالفعل! لا يمكن تشغيل نسخة ثانية.")
+        return
+
     try:
+        token = os.getenv("TELEGRAM_BOT_TOKEN")
+        if not token:
+            raise RuntimeError("❌ Bot token not found. Set TELEGRAM_BOT_TOKEN environment variable.")
+        
+        # Create application with post_init and shutdown handlers
+        application = (
+            Application.builder()
+            .token(token)
+            .post_init(init_app)
+            .post_shutdown(cleanup_on_shutdown)
+            .concurrent_updates(True)
+            .build()
+        )
+        
+        # Add handlers
+        handlers = [
+            CommandHandler(["start", "help"], start),
+            CommandHandler("channels", channels_command),
+            CommandHandler("setchannel", set_channel),
+            CommandHandler("repost", repost),
+            CallbackQueryHandler(callback_query_handler),
+            InlineQueryHandler(inline_query),
+            MessageHandler(
+                filters.ChatType.CHANNEL & (filters.TEXT | filters.Caption),
+                handle_channel_post,
+            ),
+            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text),
+        ]
+        
+        for handler in handlers:
+            application.add_handler(handler)
+        
+        # Start the bot
         application.run_polling(
             drop_pending_updates=True,
             allowed_updates=Update.ALL_TYPES,
+            close_loop=False,
         )
     except Exception as e:
         logger.critical(f"Fatal error: {e}")
     finally:
+        bot_lock.release()
         # Final cleanup
-        asyncio.get_event_loop().run_until_complete(
-            cleanup_on_shutdown(application)
-        )
+        asyncio.get_event_loop().run_until_complete(cleanup_on_shutdown(application))
 
 if __name__ == "__main__":
     main()
