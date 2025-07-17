@@ -37,7 +37,8 @@ logger = logging.getLogger(__name__)
 DB_PATH = os.getenv("DB_PATH", "stats.db")
 send_queues = defaultdict(deque)
 last_sent_time = defaultdict(float)
-MAX_QUEUE_SIZE = 50  # الحد الأقصى لحجم الطابور
+MAX_QUEUE_SIZE = 50
+_active_tasks = {}  # لتتبع المهام النشطة
 
 # دعم الأرقام والحروف
 ARABIC_DIGITS = {"٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4", "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9"}
@@ -236,37 +237,40 @@ async def send_quiz(chat_id, context, q, opts, idx, quiz_id=None, user_id=None, 
 
 async def process_queue(chat_id, context, user_id=None, is_private=False):
     """Process the send queue for a given chat."""
-    while send_queues[chat_id]:
-        q, opts, idx, quiz_id, msg_id = send_queues[chat_id].popleft()
-        
-        try:
-            # Send the quiz
-            success = await send_quiz(
-                chat_id, 
-                context, 
-                q, 
-                opts, 
-                idx, 
-                quiz_id=quiz_id,
-                user_id=user_id,
-                is_private=is_private
-            )
+    task_key = f'queue_{chat_id}'
+    if task_key in _active_tasks and not _active_tasks[task_key].done():
+        return
+
+    async def _process():
+        while send_queues[chat_id]:
+            q, opts, idx, quiz_id, msg_id = send_queues[chat_id].popleft()
             
-            # Delete original message if sent successfully
-            if success and msg_id:
-                try:
-                    await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
-                except Exception as e:
-                    logger.warning(f"Failed to delete message: {e}")
-            
-            # Add delay to prevent flooding
-            await asyncio.sleep(1)
-        except Exception as e:
-            logger.error(f"Queue processing error: {e}")
-            # Re-queue on failure
-            send_queues[chat_id].appendleft((q, opts, idx, quiz_id, msg_id))
-            await asyncio.sleep(5)  # Wait before retrying
-            break
+            try:
+                success = await send_quiz(
+                    chat_id, 
+                    context, 
+                    q, 
+                    opts, 
+                    idx, 
+                    quiz_id=quiz_id,
+                    user_id=user_id,
+                    is_private=is_private
+                )
+                
+                if success and msg_id:
+                    try:
+                        await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+                    except Exception as e:
+                        logger.warning(f"Failed to delete message: {e}")
+                
+                await asyncio.sleep(1)
+            except Exception as e:
+                logger.error(f"Queue processing error: {e}")
+                send_queues[chat_id].appendleft((q, opts, idx, quiz_id, msg_id))
+                await asyncio.sleep(5)
+                break
+
+    _active_tasks[task_key] = asyncio.create_task(_process())
 
 async def enqueue_mcq(msg, context, override=None, is_private=False):
     """Enqueue an MCQ for processing."""
@@ -297,7 +301,7 @@ async def enqueue_mcq(msg, context, override=None, is_private=False):
             found = True
     
     if found:
-        asyncio.create_task(process_queue(cid, context, user_id=msg.from_user.id, is_private=is_private))
+        await process_queue(cid, context, user_id=msg.from_user.id, is_private=is_private)
     
     return found
 
@@ -374,7 +378,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 opts = opts_str.split(":::")
                 quiz_hash = hashlib.md5((q + ':::'.join(opts)).encode()).hexdigest()
                 send_queues[update.effective_chat.id].append((q, opts, idx, quiz_id, None))
-                asyncio.create_task(process_queue(update.effective_chat.id, context, user_id=update.effective_user.id, is_private=False))
+                await process_queue(update.effective_chat.id, context, user_id=update.effective_user.id, is_private=False)
             else:
                 await update.message.reply_text(get_text("no_q", lang))
             return
@@ -526,7 +530,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
                 q, opts_str, idx = row
                 opts = opts_str.split(":::")
                 send_queues[cid].append((q, opts, idx, quiz_id, None))
-                asyncio.create_task(process_queue(cid, context, user_id=uid, is_private=False))
+                await process_queue(cid, context, user_id=uid, is_private=False)
                 txt = get_text("quiz_sent", lang)
             else:
                 txt = get_text("no_q", lang)
@@ -567,13 +571,15 @@ async def channels_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def periodic_cleanup(context: ContextTypes.DEFAULT_TYPE):
     """Periodic database cleanup task."""
-    while True:
-        try:
+    try:
+        while True:
             await cleanup_db()
             await asyncio.sleep(86400)  # يوم واحد
-        except Exception as e:
-            logger.error(f"Periodic cleanup error: {e}")
-            await asyncio.sleep(3600)  # انتظر ساعة قبل إعادة المحاولة
+    except asyncio.CancelledError:
+        logger.info("Cleanup task cancelled")
+    except Exception as e:
+        logger.error(f"Periodic cleanup error: {e}")
+        await asyncio.sleep(3600)  # انتظر ساعة قبل إعادة المحاولة
 
 async def health_check(context: ContextTypes.DEFAULT_TYPE):
     """Send health status message on startup."""
@@ -597,13 +603,30 @@ async def init_app(application: Application):
     """Initialize the application on startup."""
     try:
         await init_db()
-        asyncio.create_task(periodic_cleanup(application))
         
-        # Send health check after 5 seconds
+        # التحقق من عدم وجود مهمة تنظيف نشطة بالفعل
+        if 'cleanup' not in _active_tasks or _active_tasks['cleanup'].done():
+            _active_tasks['cleanup'] = asyncio.create_task(
+                periodic_cleanup(application)
+            )
+        
         await asyncio.sleep(5)
         await health_check(application)
     except Exception as e:
         logger.error(f"Application initialization failed: {e}")
+
+async def cleanup_on_shutdown(application: Application):
+    """Cleanup tasks on shutdown."""
+    logger.info("Shutting down...")
+    for task_name, task in _active_tasks.items():
+        if not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                logger.info(f"Task {task_name} cancelled successfully")
+            except Exception as e:
+                logger.error(f"Error cancelling task {task_name}: {e}")
 
 def main():
     """Main entry point for the bot."""
@@ -611,11 +634,12 @@ def main():
     if not token:
         raise RuntimeError("❌ Bot token not found. Set TELEGRAM_BOT_TOKEN environment variable.")
     
-    # Create application with post_init
+    # Create application with post_init and shutdown handlers
     application = (
         Application.builder()
         .token(token)
         .post_init(init_app)
+        .post_shutdown(cleanup_on_shutdown)
         .build()
     )
     
@@ -638,14 +662,18 @@ def main():
         application.add_handler(handler)
     
     # Start the bot
-    application.run_polling(
-        drop_pending_updates=True,
-        allowed_updates=Update.ALL_TYPES,
-    )
-
-if __name__ == "__main__":
     try:
-        main()
+        application.run_polling(
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES,
+        )
     except Exception as e:
         logger.critical(f"Fatal error: {e}")
-        raise
+    finally:
+        # Final cleanup
+        asyncio.get_event_loop().run_until_complete(
+            cleanup_on_shutdown(application)
+        )
+
+if __name__ == "__main__":
+    main()
