@@ -45,12 +45,192 @@ MAX_OPTION_LENGTH = 100
 # ------------------------------------------------------------------
 # 3. Translation, constants
 # ------------------------------------------------------------------
+# ... (الكود السابق حتى ARABIC_DIGITS)
+
 ARABIC_DIGITS = {**{str(i): str(i) for i in range(10)},
                  **{"٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4",
                     "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9"}}
-QUESTION_PREFIXES = ["Q", "Question", "س", "سؤال"]
-ANSWER_KEYWORDS = ["Answer", "Ans", "Correct Answer", "الإجابة", "الجواب", "الإجابة الصحيحة"]
 
+# أضف هذا القاموس مباشرة بعد ARABIC_DIGITS
+ARABIC_LETTERS = {
+    'أ': 'A', 'ا': 'A', 'إ': 'A', 'آ': 'A', 'ب': 'B', 'ت': 'C', 'ث': 'D',
+    'ج': 'E', 'ح': 'F', 'خ': 'G', 'د': 'H', 'ذ': 'I', 'ر': 'J', 'ز': 'K',
+    'س': 'L', 'ش': 'M', 'ص': 'N', 'ض': 'O', 'ط': 'P', 'ظ': 'Q', 'ع': 'R',
+    'غ': 'S', 'ف': 'T', 'ق': 'U', 'ك': 'V', 'ل': 'W', 'م': 'X', 'ن': 'Y',
+    'ه': 'Z', 'ة': 'Z', 'و': 'W', 'ي': 'Y', 'ئ': 'Y', 'ء': ''
+}
+
+# ... (الكود السابق حتى TEXTS)
+
+# احذف الدالتين القديمتين parse_single_mcq و parse_mcq تماماً
+# واستبدلهما بالدوال الجديدة التالية:
+
+def parse_single_mcq(block: str) -> Optional[Tuple[str, List[str], int]]:
+    block = re.sub(r'[\u200b\u200c\ufeff]', '', block)  # إزالة أحرف غير مرئية
+    lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+    if len(lines) > 20:  # حماية من النصوص الطويلة
+        return None
+        
+    question, options, answer_line, answer_label = None, [], None, None
+    # أنماط الأسئلة الديناميكية
+    question_prefixes = QUESTION_PREFIXES + ["MCQ", "Multiple Choice", "اختبار", "اختر", "أسئلة", "Questions", "السؤال"]
+    # أنماط الخيارات
+    option_patterns = [
+        r'^\s*([a-zأ-ي0-9\u0660-\u0669\u06f0-\u06f9])\s*[).:\-]\s*(.+)',  # أ) ... | 1. ...
+        r'^\s*[\(\[]\s*([a-zأ-ي0-9])\s*[\)\]]\s*(.+)',  # (أ) ... | [A] ...
+        r'^\s*[\u25cb\u25cf\u25a0\u2022\u00d8\*]\s*([a-zأ-ي0-9])\s*[:.]?\s*(.+)',  # ○ أ: ... | ● ب ...
+        r'^\s*[\u2794\u27a4\u2192]\s*([a-zأ-ي0-9])\s*[:.]\s*(.+)',  # ➔ أ: ... | → ب ...
+        r'^\s*([a-zأ-ي0-9])\s*[\u2013\u2014]\s*(.+)',  # أ - ... | ب — ...
+        r'^\s*\b(?:option|اختيار)\s*([a-zأ-ي0-9])\s*[:.]\s*(.+)'  # Option A: ... | اختيار أ: ...
+    ]
+    # أنماط الإجابات
+    answer_keywords = ANSWER_KEYWORDS + ["Correct", "Solution", "Key", "مفتاح", "صحيح", "صح", "الحل", "الصحيحة", "الجواب هو", "الإجابة الصحيحة هي"]
+    
+    # معالجة كل سطر
+    for i, line in enumerate(lines):
+        # التعرف على السؤال: إذا لم يتم تحديده بعد
+        if question is None:
+            for prefix in question_prefixes:
+                if line.lower().startswith(prefix.lower()):
+                    question = re.sub(f'^{re.escape(prefix)}\\s*[:.\\-]?\\s*', '', line, flags=re.I).strip()
+                    break
+            # إذا عثرنا على سؤال، نتخطى بقية المعالجة لهذا السطر
+            if question is not None:
+                continue
+        
+        # محاولة التعرف على الخيارات
+        option_found = False
+        for pattern in option_patterns:
+            m = re.match(pattern, line, re.I | re.U)
+            if m:
+                label, text = m.groups()
+                # تطبيع التسمية: تحويل الأرقام العربية وإزالة التشكيل
+                label = ''.join(ARABIC_DIGITS.get(c, c) for c in label).upper()
+                # تحويل الأحرف العربية إلى لاتينية باستخدام ARABIC_LETTERS
+                label = ''.join(ARABIC_LETTERS.get(c, c) for c in label).strip()
+                if label:
+                    options.append((label, text.strip()))
+                    option_found = True
+                    break
+        if option_found:
+            continue
+        
+        # التعرف على الإجابة: إذا لم يتم تحديدها بعد
+        if answer_line is None:
+            for kw in answer_keywords:
+                if kw.lower() in line.lower():
+                    answer_line = line
+                    # استخراج التسمية من سطر الإجابة
+                    # تجربة أنماط متعددة
+                    patterns = [
+                        r'[:：]\s*([a-zأ-ي0-9\u0660-\u0669\u06f0-\u06f9])$',  # :أ
+                        r'is\s+([a-zأ-ي0-9])',  # is A
+                        r'هي\s+([a-zأ-ي0-9])',  # هي أ
+                        r'[\(\[]\s*([a-zأ-ي0-9])\s*[\)\]]$',  # (A)
+                        r'\b(?:correct|صح|صحيح)\s*[:\-]\s*([a-zأ-ي0-9])',  # Correct: A | صح- أ
+                        r'[\u2714\u2705]\s*([a-zأ-ي0-9])'  # ✔ A | ✅ ب
+                    ]
+                    for pattern in patterns:
+                        m = re.search(pattern, line, re.I | re.U)
+                        if m:
+                            answer_label = m.group(1)
+                            # تطبيع التسمية
+                            answer_label = ''.join(ARABIC_DIGITS.get(c, c) for c in answer_label).upper()
+                            answer_label = ''.join(ARABIC_LETTERS.get(c, c) for c in answer_label).strip()
+                            break
+                    break
+    
+    # إذا لم نعثر على سؤال، نأخذ أول سطر غير فارغ
+    if question is None and lines:
+        question = lines[0]
+        # إذا كانت هناك خيارات، قد نكون أخذنا سطر الخيار الأول كسؤال
+        if options and len(options) > 0 and lines[0].startswith(options[0][0]):
+            # إذا كان السطر الأول يطابق أول خيار، فلا نأخذه كسؤال
+            question = None
+    
+    # التحقق من وجود المكونات الأساسية
+    if not question or not options or not answer_label:
+        return None
+    
+    # إنشاء خريطة العلامات إلى الفهرس
+    label_to_idx = {}
+    for idx, (label, text) in enumerate(options):
+        # تنظيف العلامة من أي رموز غير مرغوبة
+        clean_label = re.sub(r'[^A-Z0-9]', '', label)
+        label_to_idx[clean_label] = idx
+        # إذا كانت العلامة رقمية، ننشئ مرادفًا بحرف
+        if clean_label.isdigit() and 1 <= int(clean_label) <= 26:
+            letter = chr(64 + int(clean_label))
+            label_to_idx[letter] = idx
+    
+    # البحث عن الإجابة في الخريطة
+    clean_answer = re.sub(r'[^A-Z0-9]', '', answer_label)
+    if clean_answer in label_to_idx:
+        correct_index = label_to_idx[clean_answer]
+        return question, [text for _, text in options], correct_index
+    
+    # محاولة ثانية: إذا لم نجد، نبحث في القاموس النصي
+    text_answers = {
+        "الأول": "A", "أول": "A", "الألف": "A", "أ": "A", "1": "A",
+        "الثاني": "B", "ثاني": "B", "الباء": "B", "ب": "B", "2": "B",
+        "الثالث": "C", "ثالث": "C", "التاء": "C", "ت": "C", "3": "C",
+        "الرابع": "D", "رابع": "D", "الثاء": "D", "ث": "D", "4": "D",
+        "الخامس": "E", "خامس": "E", "الجيم": "E", "ج": "E", "5": "E",
+        "first": "A", "1st": "A", 
+        "second": "B", "2nd": "B",
+        "third": "C", "3rd": "C",
+        "fourth": "D", "4th": "D",
+        "fifth": "E", "5th": "E"
+    }
+    if clean_answer in text_answers:
+        clean_answer = text_answers[clean_answer]
+        if clean_answer in label_to_idx:
+            return question, [text for _, text in options], label_to_idx[clean_answer]
+    
+    return None
+
+def parse_mcq(text: str) -> List[Tuple[str, List[str], int]]:
+    # تقسيم النص إلى كتل: إما بفاصل أسطر فارغة أو ببداية سؤال جديد
+    blocks = []
+    current_block = []
+    
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            if current_block:
+                blocks.append("\n".join(current_block))
+                current_block = []
+            continue
+        
+        # إذا كان السطر يبدأ بنمط سؤال (مثل "Q", "سؤال", رقم، إلخ) ونحن في كتلة حالية، نبدأ كتلة جديدة
+        if current_block and re.match(r'^\s*(?:[Qس]|\d+[.)]|\[)', stripped, re.I):
+            blocks.append("\n".join(current_block))
+            current_block = [stripped]
+        else:
+            current_block.append(stripped)
+    
+    if current_block:
+        blocks.append("\n".join(current_block))
+    
+    results = []
+    for block in blocks:
+        parsed = parse_single_mcq(block)
+        if parsed:
+            results.append(parsed)
+        else:
+            # محاولة تقسيم الكتل التي تحتوي على أسئلة متعددة بدون فواصل
+            # بنظام: سؤال ثم خيارات ثم إجابة، ثم سؤال آخر... بدون أسطر فارغة
+            # هذه محاولة إضافية قد تزيد من المرونة
+            sub_blocks = re.split(r'(?=^\s*(?:[Qس]|\d+[.)]|\[))', block, flags=re.M | re.I)
+            for sub_block in sub_blocks:
+                if sub_block.strip():
+                    parsed_sub = parse_single_mcq(sub_block)
+                    if parsed_sub:
+                        results.append(parsed_sub)
+    
+    return results
+# ... (استمرار الكود الأصلي بعد ذلك)
 TEXTS = {
     "start": {"en": "🤖 Hi! Choose an option:", "ar": "🤖 أهلاً! اختر من القائمة:"},
     "help": {
