@@ -504,28 +504,36 @@ def main() -> None:
     if not token:
         raise RuntimeError("❌ TELEGRAM_BOT_TOKEN missing")
 
-    app = ApplicationBuilder().token(token).build()
+    # Build application (PTB v21+)
+    app = (
+        ApplicationBuilder()
+        .token(token)
+        .post_init(post_init)
+        .build()
+    )
 
-    # handlers
+    # Handlers
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CallbackQueryHandler(callback_query_handler))
-    app.add_handler(MessageHandler(filters.ChatType.CHANNEL & (filters.TEXT | filters.Caption), handle_channel_post))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app.add_handler(
+        MessageHandler(
+            filters.ChatType.CHANNEL & (filters.TEXT | filters.Caption),
+            handle_channel_post
+        )
+    )
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text)
+    )
 
-    # post_init
-    app.post_init(post_init)
+    logger.info("✅ Bot is starting...")
 
-    # graceful shutdown on signals (Unix)
-    loop = asyncio.get_event_loop()
-    try:
-        for s in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(s, lambda sig=s: asyncio.create_task(shutdown(app)))
-    except NotImplementedError:
-        # Windows or restricted env — ignore
-        pass
+    # Run bot with safe defaults
+    app.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+        close_loop=False,        # Important for Railway & asyncio
+    )
 
-    logger.info("✅ Bot starting...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
