@@ -1,0 +1,7 @@
+python-telegram-bot==21.6
+aiosqlite
+psutil
+langdetect
+openai>=1.0.0
+Flask
+
