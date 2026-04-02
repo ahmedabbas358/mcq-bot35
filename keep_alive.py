@@ -3,7 +3,6 @@ import json
 import os
 import sqlite3
 from threading import Thread
-from urllib.parse import quote_plus
 
 from flask import Flask
 
@@ -14,6 +13,20 @@ TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@
 PORT = int(os.getenv("PORT", "8080"))
 
 app = Flask(__name__)
+
+
+def quote_plus(value: str) -> str:
+    safe_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~"
+    out = []
+    for char in value or "":
+        if char == " ":
+            out.append("+")
+        elif char in safe_chars:
+            out.append(char)
+        else:
+            for byte in char.encode("utf-8"):
+                out.append(f"%{byte:02X}")
+    return "".join(out)
 
 
 def fetch_quiz(quiz_id: str):

@@ -11,6 +11,7 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - Optional OpenAI integration for:
   - `/ai <topic>` to generate quizzes from a topic.
   - `/quizify <text>` to turn source text into quizzes.
+- Optional free local AI through Ollama using the same OpenAI-compatible client.
 - Per-user settings for target, AI model, AI count, and source-message deletion.
 - External quiz preview pages for sharing on Telegram, WhatsApp, X, and other apps.
 - Runtime controls for share mode, explanation button, confirmation message, and health checks.
@@ -22,7 +23,8 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 ## Optional environment variables
 
 - `DB_PATH=stats.db`
-- `OPENAI_API_KEY=...`
+- `AI_API_KEY=...`
+- `OPENAI_BASE_URL=`
 - `OPENAI_MODEL=gpt-5.4-mini`
 - `OPENAI_REASONING_EFFORT=low`
 - `AI_DEFAULT_COUNT=3`
@@ -35,6 +37,10 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - `CONCURRENT_UPDATES=64`
 - `GLOBAL_SEND_LIMIT=100`
 - `LONG_POLL_TIMEOUT=30`
+- `MAX_QUEUE_SIZE=200`
+- `MAX_CONCURRENT_SEND=8`
+- `SEND_INTERVAL=0.15`
+- `FAST_SEND_INTERVAL=0.03`
 
 ## Commands
 
@@ -49,12 +55,32 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - `/toggleai`
 - `/setmodel <model-id>`
 - `/setcount <1-10>`
+- `/language <auto|ar|en>`
+- `/specialty <text|clear>`
+- `/delivery <fast|rich>`
 - `/sharemode <telegram|web|both>`
 - `/toggleexplain`
 - `/toggleconfirm`
 - `/health`
+- `/examples`
 - `/ai <topic>`
 - `/quizify <text>` or reply to a message with `/quizify`
+
+## Free local AI with Ollama
+
+If you want a free local setup instead of a paid API:
+
+1. Install Ollama.
+2. Pull a model such as `qwen3:8b`.
+3. Set:
+
+```bash
+OPENAI_BASE_URL=http://localhost:11434/v1
+AI_API_KEY=ollama
+OPENAI_MODEL=qwen3:8b
+```
+
+The bot will keep using the same OpenAI-compatible client but send requests to your local Ollama server.
 
 ## Run locally
 
