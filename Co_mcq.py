@@ -68,10 +68,36 @@ AI_DEFAULT_COUNT = int(os.getenv("AI_DEFAULT_COUNT", "3"))
 AI_MAX_SOURCE_CHARS = int(os.getenv("AI_MAX_SOURCE_CHARS", "4000"))
 QUIZ_CONFIRMATION_MESSAGE = env_bool("QUIZ_CONFIRMATION_MESSAGE", "true")
 ENABLE_WEB_PREVIEW = env_bool("ENABLE_WEB_PREVIEW", "true")
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+PUBLIC_BASE_URL = resolve_public_base_url()
 CONCURRENT_UPDATES = int(os.getenv("CONCURRENT_UPDATES", "64"))
 GLOBAL_SEND_LIMIT = int(os.getenv("GLOBAL_SEND_LIMIT", "100"))
 LONG_POLL_TIMEOUT = int(os.getenv("LONG_POLL_TIMEOUT", "30"))
+
+
+def resolve_public_base_url() -> str:
+    candidates = [
+        os.getenv("PUBLIC_BASE_URL", ""),
+        os.getenv("RAILWAY_STATIC_URL", ""),
+        os.getenv("RAILWAY_PUBLIC_DOMAIN", ""),
+        os.getenv("RENDER_EXTERNAL_URL", ""),
+        os.getenv("RENDER_EXTERNAL_HOSTNAME", ""),
+        os.getenv("APP_PUBLIC_URL", ""),
+        os.getenv("APP_URL", ""),
+        os.getenv("VERCEL_URL", ""),
+    ]
+    for raw in candidates:
+        value = (raw or "").strip().rstrip("/")
+        if not value:
+            continue
+        if "your-app-domain.com" in value.lower():
+            continue
+        if value.startswith("http://") or value.startswith("https://"):
+            return value
+        if "." in value or value.startswith("localhost") or value.startswith("127.0.0.1"):
+            if value.startswith("localhost") or value.startswith("127.0.0.1"):
+                return f"http://{value}"
+            return f"https://{value}"
+    return ""
 
 
 TEXTS = {
@@ -98,6 +124,8 @@ TEXTS = {
             "/provider <name> - choose the AI provider preset\n"
             "/providers - list the available AI provider presets\n"
             "/freeai - switch to the free local Ollama setup\n"
+            "/freemodels - list the recommended free local models\n"
+            "/freemodel <name> - choose a free local model\n"
             "/setcount <1-10> - default AI quiz count\n"
             "/language <auto|ar|en> - choose the bot language\n"
             "/lang <auto|ar|en> - shortcut for /language\n"
@@ -111,10 +139,11 @@ TEXTS = {
             "/ask [tool] <text> - run a smart AI tool on text\n"
             "/funmode <on|off> - enable or disable group entertainment breaks\n"
             "/funrate <1-30> - set how often group breaks appear\n"
-            "/funstyle <mixed|trivia|joke|riddle|icebreaker|poll> - choose break style\n"
+            "/funstyle <mixed|trivia|joke|riddle|icebreaker|poll|study> - choose break style\n"
             "/health - runtime health and queue status\n"
             "/examples - show supported MCQ formats\n"
             "/ai <topic> - generate quizzes from a topic\n"
+            "/study <text> - create a study pack from the text\n"
             "/quizify <text> - convert text into quizzes, or reply to a message with /quizify\n\n"
             "Quick AI shortcuts:\n"
             "- ai: biology chapter 3\n"
@@ -138,6 +167,8 @@ TEXTS = {
             "/provider <name> - اختيار مزود الذكاء الاصطناعي\n"
             "/providers - عرض مزودات الذكاء الاصطناعي المتاحة\n"
             "/freeai - التبديل إلى Ollama المحلي المجاني\n"
+            "/freemodels - عرض النماذج المحلية المجانية المقترحة\n"
+            "/freemodel <name> - اختيار نموذج محلي مجاني\n"
             "/setcount <1-10> - عدد الاختبارات الافتراضي للتوليد\n"
             "/language <auto|ar|en> - اختيار لغة البوت\n"
             "/lang <auto|ar|en> - اختصار لأمر /language\n"
@@ -151,10 +182,11 @@ TEXTS = {
             "/ask [tool] <text> - تشغيل أداة ذكية على النص\n"
             "/funmode <on|off> - تفعيل أو إيقاف الفواصل الترفيهية في المجموعات\n"
             "/funrate <1-30> - تحديد معدل ظهور الفاصل الترفيهي\n"
-            "/funstyle <mixed|trivia|joke|riddle|icebreaker|poll> - اختيار نمط الفاصل\n"
+            "/funstyle <mixed|trivia|joke|riddle|icebreaker|poll|study> - اختيار نمط الفاصل\n"
             "/health - حالة التشغيل والطوابير\n"
             "/examples - عرض صيغ الأسئلة المدعومة\n"
             "/ai <topic> - توليد اختبارات من موضوع\n"
+            "/study <text> - إنشاء حزمة مذاكرة من النص\n"
             "/quizify <text> - تحويل نص إلى اختبارات، أو رُد على رسالة باستخدام /quizify\n\n"
             "اختصارات سريعة:\n"
             "- ai: الفصل الثالث أحياء\n"
@@ -206,6 +238,7 @@ TEXTS = {
             "- AI tool: {ai_tool}\n"
             "- Delivery mode: {delivery_mode}\n"
             "- Share mode: {share_mode}\n"
+            "- Web preview URL configured: {web_preview}\n"
             "- Show explanation button: {show_explanation}\n"
             "- Confirmation message: {confirmation}\n"
             "- Group fun breaks: {fun_breaks}\n"
@@ -226,6 +259,7 @@ TEXTS = {
             "- أداة الذكاء الاصطناعي: {ai_tool}\n"
             "- وضع الإرسال: {delivery_mode}\n"
             "- وضع المشاركة: {share_mode}\n"
+            "- رابط المعاينة الخارجية مضبوط: {web_preview}\n"
             "- إظهار زر الشرح: {show_explanation}\n"
             "- رسالة التأكيد: {confirmation}\n"
             "- الفواصل الترفيهية في المجموعات: {fun_breaks}\n"
@@ -345,7 +379,7 @@ TEXTS = {
     "usage_ask": {"en": "Usage: /ask [tool] <text>", "ar": "الاستخدام: /ask [tool] <text>"},
     "usage_funmode": {"en": "Usage: /funmode <on|off>", "ar": "الاستخدام: /funmode <on|off>"},
     "usage_funrate": {"en": "Usage: /funrate <1-30>", "ar": "الاستخدام: /funrate <1-30>"},
-    "usage_funstyle": {"en": "Usage: /funstyle <mixed|trivia|joke|riddle|icebreaker|poll>", "ar": "الاستخدام: /funstyle <mixed|trivia|joke|riddle|icebreaker|poll>"},
+    "usage_funstyle": {"en": "Usage: /funstyle <mixed|trivia|joke|riddle|icebreaker|poll|study>", "ar": "الاستخدام: /funstyle <mixed|trivia|joke|riddle|icebreaker|poll|study>"},
     "tool_set": {"en": "AI tool updated to: {tool}", "ar": "تم تحديث أداة الذكاء الاصطناعي إلى: {tool}"},
     "funmode_set": {"en": "Group entertainment breaks are now {state}.", "ar": "أصبحت الفواصل الترفيهية في المجموعات {state}."},
     "funrate_set": {"en": "Fun interval updated to every {count} quizzes.", "ar": "تم تحديث معدل الفاصل إلى كل {count} أسئلة."},
@@ -359,14 +393,14 @@ TEXTS = {
             "Group entertainment controls:\n"
             "- /funmode on|off\n"
             "- /funrate 1-30\n"
-            "- /funstyle mixed|trivia|joke|riddle|icebreaker|poll\n"
+            "- /funstyle mixed|trivia|joke|riddle|icebreaker|poll|study\n"
             "When enabled, the bot inserts a short break after a few quizzes in groups."
         ),
         "ar": (
             "تحكم الفواصل الترفيهية في المجموعات:\n"
             "- /funmode on|off\n"
             "- /funrate 1-30\n"
-            "- /funstyle mixed|trivia|joke|riddle|icebreaker|poll\n"
+            "- /funstyle mixed|trivia|joke|riddle|icebreaker|poll|study\n"
             "عند التفعيل يضيف البوت فاصلًا قصيراً بعد عدة أسئلة في المجموعات."
         ),
     },
@@ -375,9 +409,36 @@ TEXTS = {
         "ar": "لم يتمكن البوت من الوصول إلى هذه الوجهة. أضف البوت هناك أولاً أو تحقق من المعرّف/الاسم.",
     },
     "free_ai_help": {
-        "en": "Free local AI is available through Ollama using OPENAI_BASE_URL=http://localhost:11434/v1 and a local model like qwen2.5:7b.",
-        "ar": "يمكنك استخدام ذكاء اصطناعي مجاني محلياً عبر Ollama باستخدام OPENAI_BASE_URL=http://localhost:11434/v1 ونموذج محلي مثل qwen2.5:7b.",
+        "en": "Free local AI is available through Ollama using OPENAI_BASE_URL=http://localhost:11434/v1 and models like qwen2.5:7b, llama3.1:8b, or gemma2:9b.",
+        "ar": "يمكنك استخدام ذكاء اصطناعي مجاني محلياً عبر Ollama باستخدام OPENAI_BASE_URL=http://localhost:11434/v1 ونماذج مثل qwen2.5:7b أو llama3.1:8b أو gemma2:9b.",
     },
+    "free_models_header": {
+        "en": "Recommended free local models:",
+        "ar": "أفضل النماذج المحلية المجانية المقترحة:",
+    },
+    "usage_freemodels": {"en": "Usage: /freemodels", "ar": "الاستخدام: /freemodels"},
+    "usage_freemodel": {"en": "Usage: /freemodel <name>", "ar": "الاستخدام: /freemodel <name>"},
+    "freemodel_set": {"en": "Free local model updated to: {model}", "ar": "تم تحديث النموذج المحلي المجاني إلى: {model}"},
+    "study_help": {
+        "en": (
+            "Study mode creates a compact study pack from your text:\n"
+            "- summary\n"
+            "- key points\n"
+            "- flashcards\n"
+            "- quick quiz\n\n"
+            "Use /study <text> or reply to a message with /study."
+        ),
+        "ar": (
+            "وضع الدراسة ينشئ حزمة مذاكرة مختصرة من النص:\n"
+            "- ملخص\n"
+            "- نقاط مهمة\n"
+            "- بطاقات\n"
+            "- اختبار سريع\n\n"
+            "استخدم /study <text> أو رُد على رسالة باستخدام /study."
+        ),
+    },
+    "usage_study": {"en": "Usage: /study <text> or reply to a message with /study", "ar": "الاستخدام: /study <text> أو رُد على رسالة باستخدام /study"},
+    "study_set": {"en": "Study pack ready.", "ar": "حزمة الدراسة جاهزة."},
 }
 
 
@@ -442,6 +503,7 @@ AI_TOOL_CATALOG = {
     "recap": {"en": "Recap sheet", "ar": "مراجعة سريعة", "desc_en": "Make a compact revision sheet.", "desc_ar": "أنشئ ورقة مراجعة مختصرة."},
     "factcheck": {"en": "Fact check", "ar": "تحقق", "desc_en": "Check claims and flag weak spots.", "desc_ar": "تحقق من الادعاءات ونقاط الضعف."},
     "fillblank": {"en": "Fill in blanks", "ar": "أكمل الفراغ", "desc_en": "Create cloze-style questions.", "desc_ar": "أنشئ أسئلة إكمال فراغات."},
+    "studypack": {"en": "Study pack", "ar": "حزمة مذاكرة", "desc_en": "Create a summary, key points, flashcards, and a quick quiz.", "desc_ar": "أنشئ ملخصاً ونقاطاً مهمة وبطاقات واختباراً سريعاً."},
     "riddle": {"en": "Riddle", "ar": "لغز", "desc_en": "Create a short riddle.", "desc_ar": "أنشئ لغزاً قصيراً."},
     "joke": {"en": "Joke", "ar": "نكتة", "desc_en": "Create a light joke or playful line.", "desc_ar": "أنشئ نكتة خفيفة أو عبارة لطيفة."},
     "icebreaker": {"en": "Icebreaker", "ar": "كسر الجليد", "desc_en": "Create a quick group conversation prompt.", "desc_ar": "أنشئ سؤالاً سريعاً للمجموعة."},
@@ -462,8 +524,12 @@ AI_TOOL_ALIASES = {
     "check": "factcheck",
     "cloze": "fillblank",
     "blank": "fillblank",
+    "study": "studypack",
+    "studypack": "studypack",
+    "revise": "studypack",
+    "learn": "studypack",
 }
-FUN_STYLE_CHOICES = {"mixed", "trivia", "joke", "riddle", "icebreaker", "poll"}
+FUN_STYLE_CHOICES = {"mixed", "trivia", "joke", "riddle", "icebreaker", "poll", "study"}
 
 AI_TOOL_SPECS = {
     "quiz": {"instruction": "Create exactly 4-option MCQ quizzes in JSON only.", "temperature": 0.2, "max_tokens": 2200},
@@ -483,6 +549,7 @@ AI_TOOL_SPECS = {
     "recap": {"instruction": "Create a compact revision sheet with headings and bullets.", "temperature": 0.2, "max_tokens": 1000},
     "factcheck": {"instruction": "Check claims, note what is strong, and flag uncertainties.", "temperature": 0.2, "max_tokens": 1000},
     "fillblank": {"instruction": "Create fill-in-the-blank practice items.", "temperature": 0.2, "max_tokens": 1000},
+    "studypack": {"instruction": "Create a compact study pack with: 1) summary, 2) key points, 3) flashcards, 4) a quick quiz. Keep it concise but useful.", "temperature": 0.2, "max_tokens": 1500},
     "riddle": {"instruction": "Create one short riddle with a clean answer.", "temperature": 0.8, "max_tokens": 500},
     "joke": {"instruction": "Create one clean light joke.", "temperature": 0.9, "max_tokens": 300},
     "icebreaker": {"instruction": "Create one short group icebreaker question.", "temperature": 0.7, "max_tokens": 400},
@@ -673,6 +740,41 @@ AI_PROVIDER_ALIASES = {
     "huggingface": "huggingface",
     "hf": "huggingface",
     "azure-openai": "azure",
+}
+
+FREE_MODEL_CATALOG = {
+    "qwen2.5:7b": {
+        "en": "Qwen2.5 7B",
+        "ar": "كوين 2.5 - 7B",
+        "desc_en": "Best balanced free choice for Arabic + English study and quiz work.",
+        "desc_ar": "أفضل خيار متوازن مجاني للعربية والإنجليزية في الدراسة والاختبارات.",
+        "recommended": True,
+    },
+    "llama3.1:8b": {
+        "en": "Llama 3.1 8B",
+        "ar": "لاما 3.1 - 8B",
+        "desc_en": "Strong general-purpose open model for mixed tasks.",
+        "desc_ar": "نموذج مفتوح قوي للاستخدام العام والمهام المختلطة.",
+        "recommended": False,
+    },
+    "gemma2:9b": {
+        "en": "Gemma 2 9B",
+        "ar": "جيما 2 - 9B",
+        "desc_en": "Good compact local model for concise study outputs.",
+        "desc_ar": "نموذج محلي مدمج ومفيد للمخرجات الدراسية المختصرة.",
+        "recommended": False,
+    },
+}
+FREE_MODEL_ALIASES = {
+    "qwen": "qwen2.5:7b",
+    "qwen2.5": "qwen2.5:7b",
+    "qwen2.5:7b-instruct": "qwen2.5:7b",
+    "llama": "llama3.1:8b",
+    "llama3.1": "llama3.1:8b",
+    "llama3.1:8b-instruct": "llama3.1:8b",
+    "gemma": "gemma2:9b",
+    "gemma2": "gemma2:9b",
+    "gemma2:9b-it": "gemma2:9b",
 }
 
 Target = Union[int, str]
@@ -1615,11 +1717,65 @@ def local_fun_break_message(style: str, lang: str) -> str:
                 "تصويت سريع: أي صيغة تساعدك أكثر؟ أ) MCQ ب) ملخص ج) بطاقات د) خليط",
             ],
         },
+        "study": {
+            "en": [
+                "Study break: What is the one concept here you would explain to a friend in 10 seconds?",
+                "Study break: Write one flashcard question from this lesson before continuing.",
+                "Study break: What is the main takeaway from the last question?",
+            ],
+            "ar": [
+                "فاصل دراسي: ما الفكرة الواحدة هنا التي يمكنك شرحها لصديق في 10 ثوانٍ؟",
+                "فاصل دراسي: اكتب سؤال بطاقة واحدة من هذا الدرس قبل المتابعة.",
+                "فاصل دراسي: ما الخلاصة الأساسية من السؤال الأخير؟",
+            ],
+        },
     }
     if style == "mixed":
-        style = random.choice(["trivia", "joke", "riddle", "icebreaker", "poll"])
+        style = random.choice(["trivia", "joke", "riddle", "icebreaker", "poll", "study"])
     options = banks.get(style, banks["trivia"]).get(lang, banks["trivia"]["en"])
     return pick(options)
+
+
+def local_study_pack(payload: str, lang: str) -> str:
+    text = " ".join((payload or "").split())
+    if not text:
+        return get_text("study_help", lang)
+
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?؟])\s+", text) if s.strip()]
+    lines = [line.strip("-• \t") for line in text.splitlines() if line.strip()]
+    core = lines[:4] if len(lines) >= 2 else sentences[:4]
+    if not core:
+        core = [text[:140]]
+    summary_items = core[:3]
+    key_points = core[:4]
+    topic_hint = summary_items[0][:90] if summary_items else text[:90]
+
+    if lang == "ar":
+        return (
+            "حزمة مذاكرة سريعة:\n\n"
+            "الملخص:\n"
+            + "\n".join(f"- {item}" for item in summary_items)
+            + "\n\nالنقاط المهمة:\n"
+            + "\n".join(f"- {item}" for item in key_points)
+            + "\n\nبطاقات:\n"
+            + f"- س: ما الفكرة الأساسية؟\n- ج: {topic_hint}\n"
+            + f"- س: اذكر نقطة مهمة واحدة.\n- ج: {key_points[0] if key_points else topic_hint}\n\n"
+            + "اختبار سريع:\n"
+            + f"- س: ما الذي يجب تذكره من هذا النص؟\n- ج: {topic_hint}"
+        )
+
+    return (
+        "Study pack:\n\n"
+        "Summary:\n"
+        + "\n".join(f"- {item}" for item in summary_items)
+        + "\n\nKey points:\n"
+        + "\n".join(f"- {item}" for item in key_points)
+        + "\n\nFlashcards:\n"
+        + f"- Q: What is the main idea?\n- A: {topic_hint}\n"
+        + f"- Q: Name one important point.\n- A: {key_points[0] if key_points else topic_hint}\n\n"
+        + "Quick quiz:\n"
+        + f"- Q: What should you remember from this text?\n- A: {topic_hint}"
+    )
 
 
 async def maybe_send_group_interlude(
@@ -1648,9 +1804,9 @@ async def maybe_send_group_interlude(
 
     selected_style = normalize_fun_style(owner_settings.fun_style)
     if selected_style == "mixed":
-        fun_tool = random.choice(["trivia", "joke", "riddle", "icebreaker", "poll"])
+        fun_tool = random.choice(["trivia", "joke", "riddle", "icebreaker", "poll", "study"])
     else:
-        fun_tool = selected_style if selected_style in {"joke", "riddle", "icebreaker", "poll"} else "trivia"
+        fun_tool = selected_style if selected_style in {"joke", "riddle", "icebreaker", "poll", "study"} else "trivia"
     text = None
     if ai_service_available(owner_settings):
         try:
@@ -1714,6 +1870,7 @@ def build_main_keyboard(lang: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📘 Help" if lang == "en" else "📘 المساعدة", callback_data="help")],
         [InlineKeyboardButton("🧪 Examples" if lang == "en" else "🧪 أمثلة", callback_data="examples")],
         [InlineKeyboardButton("🧠 AI Tools" if lang == "en" else "🧠 أدوات الذكاء", callback_data="tools")],
+        [InlineKeyboardButton("📚 Study" if lang == "en" else "📚 الدراسة", callback_data="study")],
         [InlineKeyboardButton("☁️ Providers" if lang == "en" else "☁️ المزودات", callback_data="providers")],
         [InlineKeyboardButton("🆓 Free AI" if lang == "en" else "🆓 الذكاء المجاني", callback_data="freeai")],
         [InlineKeyboardButton("🎉 Fun" if lang == "en" else "🎉 المرح", callback_data="fun")],
@@ -1738,6 +1895,11 @@ def build_controls_keyboard(lang: str, settings: UserSettings) -> InlineKeyboard
             InlineKeyboardButton("🌐 Language" if lang == "en" else "🌐 اللغة", callback_data="panel:language"),
             InlineKeyboardButton("☁️ Providers" if lang == "en" else "☁️ المزودات", callback_data="panel:providers"),
             InlineKeyboardButton("🧠 Tools" if lang == "en" else "🧠 الأدوات", callback_data="panel:tools"),
+        ],
+        [
+            InlineKeyboardButton("🆓 Free models" if lang == "en" else "🆓 النماذج المجانية", callback_data="panel:freemodels"),
+            InlineKeyboardButton("📚 Study" if lang == "en" else "📚 الدراسة", callback_data="study"),
+            InlineKeyboardButton("🎉 Fun" if lang == "en" else "🎉 المرح", callback_data="panel:fun"),
         ],
         [
             InlineKeyboardButton("⚡ Delivery" if lang == "en" else "⚡ الإرسال", callback_data="panel:delivery"),
@@ -1863,6 +2025,9 @@ def build_fun_keyboard(lang: str, settings: UserSettings) -> InlineKeyboardMarku
             InlineKeyboardButton(_selected_label("Poll" if lang == "en" else "تصويت", settings.fun_style == "poll"), callback_data="set:funstyle:poll"),
         ],
         [
+            InlineKeyboardButton(_selected_label("Study" if lang == "en" else "دراسة", settings.fun_style == "study"), callback_data="set:funstyle:study"),
+        ],
+        [
             InlineKeyboardButton(_selected_label("3", settings.fun_interval == 3), callback_data="set:funrate:3"),
             InlineKeyboardButton(_selected_label("6", settings.fun_interval == 6), callback_data="set:funrate:6"),
             InlineKeyboardButton(_selected_label("10", settings.fun_interval == 10), callback_data="set:funrate:10"),
@@ -1890,8 +2055,20 @@ def build_panel_content(panel: str, settings: UserSettings, lang: str) -> Tuple[
         return text, build_language_keyboard(lang, settings)
     if panel == "providers":
         return build_providers_text(lang), build_provider_keyboard(lang, settings)
+    if panel == "freemodels":
+        if lang == "en":
+            text = f"{build_free_models_text(lang)}\n\nCurrent local model: {settings.ai_model}"
+        else:
+            text = f"{build_free_models_text(lang)}\n\nالنموذج المحلي الحالي: {settings.ai_model}"
+        return text, build_free_models_keyboard(lang, settings)
     if panel == "tools":
         return build_tools_text(lang), build_tools_keyboard(lang, settings)
+    if panel == "study":
+        if lang == "en":
+            text = f"{build_study_text(lang)}\n\nCurrent tool: {humanize_ai_tool(settings.ai_tool_mode, lang)}"
+        else:
+            text = f"{build_study_text(lang)}\n\nالأداة الحالية: {humanize_ai_tool(settings.ai_tool_mode, lang)}"
+        return text, build_study_keyboard(lang, settings)
     if panel == "delivery":
         if lang == "en":
             text = (
@@ -2021,6 +2198,19 @@ def humanize_ai_provider(provider: str, lang: str) -> str:
     return meta["ar"] if lang == "ar" else meta["en"]
 
 
+def normalize_free_model(value: Optional[str]) -> Optional[str]:
+    raw = (value or "").strip().lower().replace(" ", "")
+    raw = FREE_MODEL_ALIASES.get(raw, raw)
+    return raw if raw in FREE_MODEL_CATALOG else None
+
+
+def humanize_free_model(model: str, lang: str) -> str:
+    meta = FREE_MODEL_CATALOG.get(normalize_free_model(model) or "", None)
+    if not meta:
+        return model
+    return meta["ar"] if lang == "ar" else meta["en"]
+
+
 def humanize_fun_style(style: str, lang: str) -> str:
     names = {
         "mixed": {"en": "mixed", "ar": "متنوع"},
@@ -2029,6 +2219,7 @@ def humanize_fun_style(style: str, lang: str) -> str:
         "riddle": {"en": "riddle", "ar": "لغز"},
         "icebreaker": {"en": "icebreaker", "ar": "كسر الجليد"},
         "poll": {"en": "poll", "ar": "تصويت"},
+        "study": {"en": "study", "ar": "دراسة"},
     }
     return names.get(style, names["mixed"]).get(lang, names["mixed"]["en"])
 
@@ -2054,6 +2245,7 @@ def build_settings_text(settings: UserSettings, lang: str) -> str:
         ai_tool=humanize_ai_tool(settings.ai_tool_mode, lang),
         delivery_mode=humanize_delivery_mode(settings.delivery_mode, lang),
         share_mode=humanize_share_mode(settings.share_mode, lang),
+        web_preview=humanize_toggle(bool(PUBLIC_BASE_URL), lang),
         show_explanation=humanize_toggle(settings.show_explanation, lang),
         confirmation=humanize_toggle(settings.confirmation_message, lang),
         fun_breaks=humanize_toggle(settings.fun_breaks, lang),
@@ -2086,6 +2278,55 @@ def build_tools_text(lang: str) -> str:
     return "\n".join(lines)
 
 
+def build_free_models_text(lang: str) -> str:
+    lines = [get_text("free_models_header", lang)]
+    for key, meta in FREE_MODEL_CATALOG.items():
+        label = meta["ar"] if lang == "ar" else meta["en"]
+        desc = meta["desc_ar"] if lang == "ar" else meta["desc_en"]
+        badge = "⭐" if meta.get("recommended") else "•"
+        lines.append(f"{badge} `{key}`: {label} - {desc}")
+    lines.append("")
+    lines.append(get_text("free_ai_help", lang))
+    return "\n".join(lines)
+
+
+def build_free_models_keyboard(lang: str, settings: UserSettings) -> InlineKeyboardMarkup:
+    buttons: List[List[InlineKeyboardButton]] = []
+    current = normalize_free_model(settings.ai_model) or normalize_free_model("qwen2.5:7b")
+    row: List[InlineKeyboardButton] = []
+    for key, meta in FREE_MODEL_CATALOG.items():
+        label = meta["ar"] if lang == "ar" else meta["en"]
+        row.append(InlineKeyboardButton(_selected_label(label, current == key), callback_data=f"set:freemodel:{key}"))
+        if len(row) == 1:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.extend(_back_keyboard(lang))
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_study_text(lang: str) -> str:
+    return get_text("study_help", lang)
+
+
+def build_study_keyboard(lang: str, settings: UserSettings) -> InlineKeyboardMarkup:
+    buttons = [
+        [
+            InlineKeyboardButton("📚 /study" if lang == "en" else "📚 /study", callback_data="set:studytool:studypack"),
+            InlineKeyboardButton("📝 Summary" if lang == "en" else "📝 ملخص", callback_data="set:tool:summary"),
+            InlineKeyboardButton("🧠 Flashcards" if lang == "en" else "🧠 بطاقات", callback_data="set:tool:flashcards"),
+        ],
+        [
+            InlineKeyboardButton("🔍 Recap" if lang == "en" else "🔍 مراجعة", callback_data="set:tool:recap"),
+            InlineKeyboardButton("🧩 Quiz" if lang == "en" else "🧩 اختبار", callback_data="set:tool:quiz"),
+            InlineKeyboardButton("🪄 Simplify" if lang == "en" else "🪄 تبسيط", callback_data="set:tool:simplify"),
+        ],
+    ]
+    buttons.extend(_back_keyboard(lang))
+    return InlineKeyboardMarkup(buttons)
+
+
 async def resolve_user_lang(user_id: int, telegram_lang: Optional[str], sample: str = "") -> str:
     settings = await get_user_settings(user_id)
     if settings.preferred_language in {"ar", "en"}:
@@ -2100,14 +2341,25 @@ def get_preview_url(quiz_id: str) -> str:
 
 
 def build_external_share_rows(preview_url: str, quiz_id: str, question: str, lang: str) -> List[List[InlineKeyboardButton]]:
-    if not preview_url:
-        return []
     share_text = f"{question[:120]} - {preview_url}"
-    whatsapp_url = f"https://wa.me/?text={quote_plus(share_text)}"
-    telegram_url = f"https://t.me/share/url?url={quote_plus(preview_url)}&text={quote_plus(question[:120])}"
-    x_url = f"https://twitter.com/intent/tweet?url={quote_plus(preview_url)}&text={quote_plus(question[:120])}"
+    text_only = question[:120]
+    if preview_url:
+        whatsapp_url = f"https://wa.me/?text={quote_plus(share_text)}"
+        telegram_url = f"https://t.me/share/url?url={quote_plus(preview_url)}&text={quote_plus(text_only)}"
+        x_url = f"https://twitter.com/intent/tweet?url={quote_plus(preview_url)}&text={quote_plus(text_only)}"
+        return [
+            [InlineKeyboardButton(get_text("open_preview", lang), url=preview_url)],
+            [
+                InlineKeyboardButton("Telegram", url=telegram_url),
+                InlineKeyboardButton("WhatsApp", url=whatsapp_url),
+                InlineKeyboardButton("X", url=x_url),
+            ],
+        ]
+
+    telegram_url = f"https://t.me/share/url?text={quote_plus(text_only)}"
+    whatsapp_url = f"https://wa.me/?text={quote_plus(text_only)}"
+    x_url = f"https://twitter.com/intent/tweet?text={quote_plus(text_only)}"
     return [
-        [InlineKeyboardButton(get_text("open_preview", lang), url=preview_url)],
         [
             InlineKeyboardButton("Telegram", url=telegram_url),
             InlineKeyboardButton("WhatsApp", url=whatsapp_url),
@@ -2576,7 +2828,35 @@ async def freeai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
     updated = await update_user_settings(user.id, ai_provider="ollama", ai_model="qwen2.5:7b", ai_enabled=True)
     await send_text_reply(message, get_text("provider_free", lang))
-    await send_text_reply(message, get_text("free_ai_help", lang))
+    await send_text_reply(message, build_free_models_text(lang), reply_markup=build_free_models_keyboard(lang, updated))
+    await send_text_reply(message, build_settings_text(updated, lang), reply_markup=build_controls_keyboard(lang, updated))
+
+
+async def freemodels_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
+    await show_panel(message, user.id, lang, "freemodels")
+
+
+async def freemodel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
+    raw_value = " ".join(context.args).strip()
+    model = normalize_free_model(raw_value)
+    if not raw_value:
+        await show_panel(message, user.id, lang, "freemodels")
+        return
+    if model is None:
+        await send_text_reply(message, get_text("usage_freemodel", lang))
+        return
+    updated = await update_user_settings(user.id, ai_provider="ollama", ai_model=model, ai_enabled=True)
+    await send_text_reply(message, get_text("freemodel_set", lang, model=humanize_free_model(updated.ai_model, lang)))
     await send_text_reply(message, build_settings_text(updated, lang), reply_markup=build_controls_keyboard(lang, updated))
 
 
@@ -2809,6 +3089,21 @@ async def quizify_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await run_ai_flow(message=message, context=context, owner_user_id=user.id, lang=lang, mode="text", payload=payload)
 
 
+async def study_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
+    payload = " ".join(context.args).strip()
+    if not payload and message.reply_to_message:
+        payload = extract_message_text(message.reply_to_message)
+    if not payload:
+        await show_panel(message, user.id, lang, "study")
+        return
+    await run_ai_tool_flow(message=message, context=context, owner_user_id=user.id, lang=lang, tool="studypack", payload=payload)
+
+
 async def run_ai_tool_flow(
     *,
     message: Message,
@@ -2836,6 +3131,8 @@ async def run_ai_tool_flow(
     if not ai_service_available(settings):
         if selected_tool in {"joke", "riddle", "icebreaker", "trivia"}:
             await send_text_reply(message, local_fun_break_message(selected_tool, lang))
+        elif selected_tool == "studypack":
+            await send_text_reply(message, local_study_pack(payload, lang))
         else:
             await send_text_reply(message, get_text("ai_disabled_global", lang))
         return
@@ -2998,15 +3295,23 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         with contextlib.suppress(Exception):
             await edit_panel(query, user.id, lang, "tools")
         return
+    if data == "study":
+        with contextlib.suppress(Exception):
+            await edit_panel(query, user.id, lang, "study")
+        return
     if data == "providers":
         with contextlib.suppress(Exception):
             await edit_panel(query, user.id, lang, "providers")
+        return
+    if data == "freemodels":
+        with contextlib.suppress(Exception):
+            await edit_panel(query, user.id, lang, "freemodels")
         return
     if data == "freeai":
         if user:
             updated = await update_user_settings(user.id, ai_provider="ollama", ai_model="qwen2.5:7b", ai_enabled=True)
             with contextlib.suppress(Exception):
-                await query.edit_message_text(build_settings_text(updated, lang), reply_markup=build_controls_keyboard(lang, updated))
+                await query.edit_message_text(build_free_models_text(lang), reply_markup=build_free_models_keyboard(lang, updated))
         return
     if data == "fun":
         with contextlib.suppress(Exception):
@@ -3018,7 +3323,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
             settings = await get_user_settings(user.id)
             with contextlib.suppress(Exception):
                 await query.edit_message_text(build_settings_text(settings, lang), reply_markup=build_controls_keyboard(lang, settings))
-        elif panel in {"language", "providers", "tools", "delivery", "share", "count", "fun"} and user:
+        elif panel in {"language", "providers", "freemodels", "tools", "study", "delivery", "share", "count", "fun"} and user:
             with contextlib.suppress(Exception):
                 await edit_panel(query, user.id, lang, panel)
         else:
@@ -3088,6 +3393,17 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
             with contextlib.suppress(Exception):
                 await query.edit_message_text(build_providers_text(lang), reply_markup=build_provider_keyboard(lang, updated))
             return
+        if kind == "freemodel":
+            model = normalize_free_model(value)
+            if model is None:
+                with contextlib.suppress(Exception):
+                    await query.answer(get_text("usage_freemodel", lang), show_alert=True)
+                return
+            await update_user_settings(user.id, ai_provider="ollama", ai_model=model, ai_enabled=True)
+            updated = await get_user_settings(user.id)
+            with contextlib.suppress(Exception):
+                await query.edit_message_text(build_free_models_text(lang), reply_markup=build_free_models_keyboard(lang, updated))
+            return
         if kind == "tool":
             tool = resolve_ai_tool_choice(value)
             if tool is None:
@@ -3098,6 +3414,17 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
             updated = await get_user_settings(user.id)
             with contextlib.suppress(Exception):
                 await query.edit_message_text(build_tools_text(lang), reply_markup=build_tools_keyboard(lang, updated))
+            return
+        if kind == "studytool":
+            tool = resolve_ai_tool_choice(value)
+            if tool is None:
+                with contextlib.suppress(Exception):
+                    await query.answer(get_text("usage_tool", lang), show_alert=True)
+                return
+            await update_user_settings(user.id, ai_tool_mode=tool)
+            updated = await get_user_settings(user.id)
+            with contextlib.suppress(Exception):
+                await query.edit_message_text(build_study_text(lang), reply_markup=build_study_keyboard(lang, updated))
             return
         if kind == "funstyle":
             await update_user_settings(user.id, fun_style=normalize_fun_style(value))
@@ -3137,8 +3464,10 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
             return
         question, options, correct_option, explanation, owner_user_id = quiz
         try:
+            owner_settings = await get_user_settings(owner_user_id) if owner_user_id else None
+            target = owner_settings.default_target if owner_settings and owner_settings.default_target else query.message.chat.id
             await enqueue_quiz_items(
-                target=query.message.chat.id,
+                target=target,
                 quizzes=[(question, options, correct_option, explanation)],
                 context=context,
                 owner_user_id=owner_user_id,
@@ -3343,6 +3672,8 @@ def main() -> None:
     app.add_handler(CommandHandler("providers", providers_handler))
     app.add_handler(CommandHandler("provider", provider_handler))
     app.add_handler(CommandHandler("freeai", freeai_handler))
+    app.add_handler(CommandHandler("freemodels", freemodels_handler))
+    app.add_handler(CommandHandler("freemodel", freemodel_handler))
     app.add_handler(CommandHandler("setcount", setcount_handler))
     app.add_handler(CommandHandler("language", language_handler))
     app.add_handler(CommandHandler("lang", language_handler))
@@ -3356,6 +3687,7 @@ def main() -> None:
     app.add_handler(CommandHandler("tools", tools_handler))
     app.add_handler(CommandHandler("tool", tool_handler))
     app.add_handler(CommandHandler("ask", ask_handler))
+    app.add_handler(CommandHandler("study", study_handler))
     app.add_handler(CommandHandler("funmode", funmode_handler))
     app.add_handler(CommandHandler("funrate", funrate_handler))
     app.add_handler(CommandHandler("funstyle", funstyle_handler))

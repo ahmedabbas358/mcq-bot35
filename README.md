@@ -15,10 +15,11 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - Smart AI tools for summaries, translation, flashcards, simplification, riddles, jokes, icebreakers, and more.
 - Optional group entertainment breaks that appear after a configurable number of quizzes.
 - Optional free local AI through Ollama using the same OpenAI-compatible client.
+- Recommended free local models: `qwen2.5:7b`, `llama3.1:8b`, and `gemma2:9b`.
 - Per-user settings for target, AI model, AI count, and source-message deletion.
 - External quiz preview pages for sharing on Telegram, WhatsApp, X, and other apps.
 - Runtime controls for share mode, explanation button, confirmation message, language, AI tool mode, fun breaks, and health checks.
-- Inline control panels for language, providers, tools, delivery mode, share mode, batch size, and fun preferences.
+- Inline control panels for language, providers, free models, tools, study mode, delivery mode, share mode, batch size, and fun preferences.
 
 ## Required environment variables
 
@@ -62,6 +63,8 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - `/providers`
 - `/provider <name>`
 - `/freeai`
+- `/freemodels`
+- `/freemodel <name>`
 - `/setcount <1-10>`
 - `/language <auto|ar|en>`
 - `/lang <auto|ar|en>`
@@ -75,10 +78,11 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - `/ask [tool] <text>`
 - `/funmode <on|off>`
 - `/funrate <1-30>`
-- `/funstyle <mixed|trivia|joke|riddle|icebreaker|poll>`
+- `/funstyle <mixed|trivia|joke|riddle|icebreaker|poll|study>`
 - `/health`
 - `/examples`
 - `/ai <topic>`
+- `/study <text>`
 - `/quizify <text>` or reply to a message with `/quizify`
 
 The bot supports Arabic and English interfaces through `/language <auto|ar|en>` or the `/lang` shortcut.
@@ -98,10 +102,12 @@ OPENAI_MODEL=qwen2.5:7b
 ```
 
 The bot will keep using the same OpenAI-compatible client but send requests to your local Ollama server.
+If you want other free local options, open `/freemodels` in the bot and pick `llama3.1:8b` or `gemma2:9b`.
+For external share preview links, set `PUBLIC_BASE_URL` when you can, or let the app auto-detect the public Railway / Render / Vercel URL if your platform exposes one.
 
 ## AI control panel
 
-Use `/controls` to open the full inline control panel. From there you can switch language, choose a provider preset, change the AI tool, adjust delivery and share modes, and tune group fun breaks without memorizing commands.
+Use `/controls` to open the full inline control panel. From there you can switch language, choose a provider preset, choose a free local model, change the AI tool, open study mode, adjust delivery and share modes, and tune group fun breaks without memorizing commands.
 
 ## Run locally
 

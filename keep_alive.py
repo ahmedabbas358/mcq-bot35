@@ -4,15 +4,44 @@ import os
 import sqlite3
 from threading import Thread
 
-from flask import Flask
+from flask import Flask, request
 
 
 DB_PATH = os.getenv("DB_PATH", "stats.db")
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
 PORT = int(os.getenv("PORT", "8080"))
 
 app = Flask(__name__)
+
+
+def resolve_public_base_url(base_hint: str = "") -> str:
+    candidates = [
+        os.getenv("PUBLIC_BASE_URL", ""),
+        os.getenv("RAILWAY_STATIC_URL", ""),
+        os.getenv("RAILWAY_PUBLIC_DOMAIN", ""),
+        os.getenv("RENDER_EXTERNAL_URL", ""),
+        os.getenv("RENDER_EXTERNAL_HOSTNAME", ""),
+        os.getenv("APP_PUBLIC_URL", ""),
+        os.getenv("APP_URL", ""),
+        os.getenv("VERCEL_URL", ""),
+        base_hint,
+    ]
+    for raw in candidates:
+        value = (raw or "").strip().rstrip("/")
+        if not value:
+            continue
+        if "your-app-domain.com" in value.lower():
+            continue
+        if value.startswith("http://") or value.startswith("https://"):
+            return value
+        if "." in value or value.startswith("localhost") or value.startswith("127.0.0.1"):
+            if value.startswith("localhost") or value.startswith("127.0.0.1"):
+                return f"http://{value}"
+            return f"https://{value}"
+    return ""
+
+
+PUBLIC_BASE_URL = resolve_public_base_url()
 
 
 def quote_plus(value: str) -> str:
@@ -238,7 +267,8 @@ def quiz_preview(quiz_id: str):
             f'<div class="{css_class}"><span class="badge">{label}</span><div>{option_text}</div></div>'
         )
 
-    preview_url = f"{PUBLIC_BASE_URL}/quiz/{quiz_id}" if PUBLIC_BASE_URL else ""
+    base_url = resolve_public_base_url(request.url_root)
+    preview_url = f"{base_url}/quiz/{quiz_id}" if base_url else ""
     share_seed = preview_url or quiz["question"]
     telegram_share = f"https://t.me/share/url?url={quote_plus(preview_url)}&text={quote_plus(quiz['question'][:120])}" if preview_url else ""
     whatsapp_share = f"https://wa.me/?text={quote_plus(share_seed)}"
