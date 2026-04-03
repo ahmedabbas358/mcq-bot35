@@ -408,6 +408,7 @@ send_queues: Dict[Target, asyncio.Queue] = defaultdict(lambda: asyncio.Queue(max
 sender_tasks: Dict[Target, List[asyncio.Task]] = defaultdict(list)
 _openai_client: Optional["OpenAI"] = None
 global_send_semaphore = asyncio.Semaphore(GLOBAL_SEND_LIMIT)
+chat_type_cache: Dict[str, str] = {}
 
 
 def get_text(key: str, lang: str = "en", **kwargs) -> str:
@@ -943,7 +944,7 @@ async def record_stats(user_id: int, target: Target, chat_type: str, title: str)
         await conn.execute("UPDATE user_stats SET sent=sent+1 WHERE user_id=?", (user_id,))
     target_id = str(target)
     await conn.execute(
-        "INSERT OR IGNORE INTO target_stats(target_id, chat_type, title, sent) VALUES (?, ?, ?, 0)",
+        "INSERT OR IGNORE INTO target_stats(target_id, chat_type, title, sent) VALUES (?, ?, ?, ?)",
         (target_id, chat_type or "", title or "", 0),
     )
     await conn.execute(
@@ -1109,6 +1110,28 @@ async def resolve_target_chat(bot, target: Target) -> Optional[Tuple[Target, str
         return None
 
 
+async def resolve_target_chat_type(bot, target: Target) -> str:
+    cache_key = str(target)
+    cached = chat_type_cache.get(cache_key)
+    if cached:
+        return cached
+    try:
+        chat = await bot.get_chat(target)
+    except Exception:
+        if isinstance(target, int):
+            try:
+                chat = await bot.get_chat(target)
+            except Exception:
+                return ""
+        else:
+            return ""
+    chat_type = getattr(chat, "type", "") or ""
+    if chat_type:
+        chat_type_cache[cache_key] = chat_type
+        chat_type_cache[str(chat.id)] = chat_type
+    return chat_type
+
+
 def build_main_keyboard(lang: str) -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton("⚙️ Settings" if lang == "en" else "⚙️ الإعدادات", callback_data="settings")],
@@ -1231,13 +1254,14 @@ async def _sender(target: Target, context: ContextTypes.DEFAULT_TYPE, worker_idx
             item: SendItem = await send_queues[target].get()
             async with global_send_semaphore:
                 try:
+                    target_chat_type = await resolve_target_chat_type(context.bot, target)
                     sent_message = await context.bot.send_poll(
                         chat_id=target,
                         question=item.question,
                         options=item.options,
                         type=Poll.QUIZ,
                         correct_option_id=item.correct_index,
-                        is_anonymous=False,
+                        is_anonymous=target_chat_type == ChatType.CHANNEL,
                     )
 
                     await save_quiz(
@@ -1384,7 +1408,7 @@ async def enqueue_mcq(
             lang=lang,
             source_chat_id=message.chat.id,
             source_message_id=message.message_id,
-            delete_source=settings.delete_source and is_private,
+            delete_source=settings.delete_source and message.chat.type != ChatType.CHANNEL,
         )
     except asyncio.QueueFull:
         if notify_fail:
