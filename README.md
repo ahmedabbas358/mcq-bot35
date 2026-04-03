@@ -11,12 +11,14 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - Optional OpenAI integration for:
   - `/ai <topic>` to generate quizzes from a topic.
   - `/quizify <text>` to turn source text into quizzes.
+- AI provider presets with `/providers`, `/provider <name>`, and `/freeai` for the local Ollama profile.
 - Smart AI tools for summaries, translation, flashcards, simplification, riddles, jokes, icebreakers, and more.
 - Optional group entertainment breaks that appear after a configurable number of quizzes.
 - Optional free local AI through Ollama using the same OpenAI-compatible client.
 - Per-user settings for target, AI model, AI count, and source-message deletion.
 - External quiz preview pages for sharing on Telegram, WhatsApp, X, and other apps.
 - Runtime controls for share mode, explanation button, confirmation message, language, AI tool mode, fun breaks, and health checks.
+- Inline control panels for language, providers, tools, delivery mode, share mode, batch size, and fun preferences.
 
 ## Required environment variables
 
@@ -49,6 +51,7 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - `/start`
 - `/help`
 - `/settings`
+- `/controls`
 - `/stats`
 - `/setchannel <chat_id|@channel|here>`
 - `/publishhere`
@@ -56,8 +59,12 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - `/toggledelete`
 - `/toggleai`
 - `/setmodel <model-id>`
+- `/providers`
+- `/provider <name>`
+- `/freeai`
 - `/setcount <1-10>`
 - `/language <auto|ar|en>`
+- `/lang <auto|ar|en>`
 - `/specialty <text|clear>`
 - `/delivery <fast|rich>`
 - `/sharemode <telegram|web|both>`
@@ -74,23 +81,27 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - `/ai <topic>`
 - `/quizify <text>` or reply to a message with `/quizify`
 
-The bot supports Arabic and English interfaces through `/language <auto|ar|en>`.
+The bot supports Arabic and English interfaces through `/language <auto|ar|en>` or the `/lang` shortcut.
 
 ## Free local AI with Ollama
 
 If you want a free local setup instead of a paid API:
 
 1. Install Ollama.
-2. Pull a model such as `qwen3:8b`.
+2. Pull the recommended free model `qwen2.5:7b`.
 3. Set:
 
 ```bash
 OPENAI_BASE_URL=http://localhost:11434/v1
 AI_API_KEY=ollama
-OPENAI_MODEL=qwen3:8b
+OPENAI_MODEL=qwen2.5:7b
 ```
 
 The bot will keep using the same OpenAI-compatible client but send requests to your local Ollama server.
+
+## AI control panel
+
+Use `/controls` to open the full inline control panel. From there you can switch language, choose a provider preset, change the AI tool, adjust delivery and share modes, and tune group fun breaks without memorizing commands.
 
 ## Run locally
 

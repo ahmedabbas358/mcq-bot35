@@ -87,6 +87,7 @@ TEXTS = {
             "- Channels: make the bot admin, then post MCQ text or start the post with ai: to generate quizzes.\n\n"
             "Commands:\n"
             "/settings - show current settings\n"
+            "/controls - open the full control panel\n"
             "/stats - show usage stats\n"
             "/setchannel <chat_id|@channel|here> - set default publishing target\n"
             "/publishhere - set current chat as your default target\n"
@@ -94,8 +95,12 @@ TEXTS = {
             "/toggledelete - toggle deleting source messages after publishing\n"
             "/toggleai - enable or disable AI for your account\n"
             "/setmodel <model> - override AI model\n"
+            "/provider <name> - choose the AI provider preset\n"
+            "/providers - list the available AI provider presets\n"
+            "/freeai - switch to the free local Ollama setup\n"
             "/setcount <1-10> - default AI quiz count\n"
             "/language <auto|ar|en> - choose the bot language\n"
+            "/lang <auto|ar|en> - shortcut for /language\n"
             "/specialty <text|clear> - set AI specialty or domain\n"
             "/delivery <fast|rich> - prioritize speed or richer buttons\n"
             "/sharemode <telegram|web|both> - choose how share buttons appear\n"
@@ -122,6 +127,7 @@ TEXTS = {
             "- في القنوات: اجعل البوت مشرفاً، ثم انشر نص MCQ أو ابدأ المنشور بـ ai: لتوليد الاختبارات.\n\n"
             "الأوامر:\n"
             "/settings - عرض الإعدادات الحالية\n"
+            "/controls - فتح لوحة التحكم الكاملة\n"
             "/stats - عرض الإحصاءات\n"
             "/setchannel <chat_id|@channel|here> - تعيين جهة النشر الافتراضية\n"
             "/publishhere - تعيين الدردشة الحالية كوجهة افتراضية\n"
@@ -129,8 +135,12 @@ TEXTS = {
             "/toggledelete - تبديل حذف رسالة المصدر بعد النشر\n"
             "/toggleai - تشغيل أو إيقاف الذكاء الاصطناعي لحسابك\n"
             "/setmodel <model> - تغيير نموذج الذكاء الاصطناعي\n"
+            "/provider <name> - اختيار مزود الذكاء الاصطناعي\n"
+            "/providers - عرض مزودات الذكاء الاصطناعي المتاحة\n"
+            "/freeai - التبديل إلى Ollama المحلي المجاني\n"
             "/setcount <1-10> - عدد الاختبارات الافتراضي للتوليد\n"
             "/language <auto|ar|en> - اختيار لغة البوت\n"
+            "/lang <auto|ar|en> - اختصار لأمر /language\n"
             "/specialty <text|clear> - ضبط تخصص الذكاء الاصطناعي\n"
             "/delivery <fast|rich> - تفضيل السرعة أو المزايا الغنية\n"
             "/sharemode <telegram|web|both> - اختيار شكل أزرار المشاركة\n"
@@ -189,6 +199,7 @@ TEXTS = {
             "- AI available: {ai_available}\n"
             "- AI enabled for you: {ai_enabled}\n"
             "- AI model: {ai_model}\n"
+            "- AI provider: {ai_provider}\n"
             "- AI batch size: {ai_count}\n"
             "- Interface language: {language}\n"
             "- AI specialty: {specialty}\n"
@@ -208,6 +219,7 @@ TEXTS = {
             "- توفر خدمة الذكاء الاصطناعي: {ai_available}\n"
             "- الذكاء الاصطناعي مفعل لك: {ai_enabled}\n"
             "- نموذج الذكاء الاصطناعي: {ai_model}\n"
+            "- مزود الذكاء الاصطناعي: {ai_provider}\n"
             "- عدد الأسئلة الافتراضي: {ai_count}\n"
             "- لغة الواجهة: {language}\n"
             "- تخصص الذكاء الاصطناعي: {specialty}\n"
@@ -255,6 +267,12 @@ TEXTS = {
     },
     "ai_usage_tool": {"en": "Usage: /ask [tool] <text>", "ar": "الاستخدام: /ask [tool] <text>"},
     "model_set": {"en": "AI model updated to: {model}", "ar": "تم تحديث نموذج الذكاء الاصطناعي إلى: {model}"},
+    "provider_set": {"en": "AI provider updated to: {provider}", "ar": "تم تحديث مزود الذكاء الاصطناعي إلى: {provider}"},
+    "provider_free": {"en": "Free local AI enabled with Ollama and qwen2.5:7b.", "ar": "تم تفعيل الذكاء الاصطناعي المحلي المجاني عبر Ollama و qwen2.5:7b."},
+    "provider_missing": {
+        "en": "This provider needs its API key or endpoint configured in environment variables.",
+        "ar": "هذا المزود يحتاج إلى إعداد مفتاح API أو نقطة نهاية في متغيرات البيئة.",
+    },
     "count_set": {"en": "Default AI batch size updated to: {count}", "ar": "تم تحديث العدد الافتراضي لأسئلة الذكاء الاصطناعي إلى: {count}"},
     "language_set": {"en": "Bot language updated to: {language}", "ar": "تم تحديث لغة البوت إلى: {language}"},
     "usage_language": {"en": "Usage: /language <auto|ar|en>", "ar": "الاستخدام: /language <auto|ar|en>"},
@@ -319,6 +337,9 @@ TEXTS = {
     "unsupported": {"en": "Unsupported action.", "ar": "إجراء غير مدعوم."},
     "usage_setchannel": {"en": "Usage: /setchannel <chat_id|@channel|here>", "ar": "الاستخدام: /setchannel <chat_id|@channel|here>"},
     "usage_setmodel": {"en": "Usage: /setmodel <model-id>", "ar": "الاستخدام: /setmodel <model-id>"},
+    "usage_provider": {"en": "Usage: /provider <name>", "ar": "الاستخدام: /provider <name>"},
+    "usage_providers": {"en": "Usage: /providers", "ar": "الاستخدام: /providers"},
+    "usage_freeai": {"en": "Usage: /freeai", "ar": "الاستخدام: /freeai"},
     "usage_setcount": {"en": "Usage: /setcount <1-10>", "ar": "الاستخدام: /setcount <1-10>"},
     "usage_tool": {"en": "Usage: /tool <mode>", "ar": "الاستخدام: /tool <mode>"},
     "usage_ask": {"en": "Usage: /ask [tool] <text>", "ar": "الاستخدام: /ask [tool] <text>"},
@@ -332,6 +353,7 @@ TEXTS = {
     "tools_header": {"en": "Available AI tools:", "ar": "أدوات الذكاء الاصطناعي المتاحة:"},
     "fun_break_header": {"en": "Group break", "ar": "فاصل للمجموعة"},
     "fun_break_label": {"en": "Quick break", "ar": "فاصل سريع"},
+    "providers_header": {"en": "Available AI provider presets:", "ar": "مزوّدات الذكاء الاصطناعي المتاحة:"},
     "fun_help": {
         "en": (
             "Group entertainment controls:\n"
@@ -353,8 +375,8 @@ TEXTS = {
         "ar": "لم يتمكن البوت من الوصول إلى هذه الوجهة. أضف البوت هناك أولاً أو تحقق من المعرّف/الاسم.",
     },
     "free_ai_help": {
-        "en": "Free local AI is available through Ollama using OPENAI_BASE_URL=http://localhost:11434/v1 and a local model like qwen3:8b.",
-        "ar": "يمكنك استخدام ذكاء اصطناعي مجاني محلياً عبر Ollama باستخدام OPENAI_BASE_URL=http://localhost:11434/v1 ونموذج محلي مثل qwen3:8b.",
+        "en": "Free local AI is available through Ollama using OPENAI_BASE_URL=http://localhost:11434/v1 and a local model like qwen2.5:7b.",
+        "ar": "يمكنك استخدام ذكاء اصطناعي مجاني محلياً عبر Ollama باستخدام OPENAI_BASE_URL=http://localhost:11434/v1 ونموذج محلي مثل qwen2.5:7b.",
     },
 }
 
@@ -467,6 +489,192 @@ AI_TOOL_SPECS = {
     "trivia": {"instruction": "Create one short trivia fact or question with a crisp answer.", "temperature": 0.7, "max_tokens": 500},
 }
 
+AI_PROVIDER_CATALOG = {
+    "auto": {
+        "en": "Auto / current env",
+        "ar": "تلقائي / بيئة التشغيل",
+        "base_url": "",
+        "api_key_env": "",
+        "default_model": OPENAI_MODEL,
+        "mode": "compatible",
+    },
+    "openai": {
+        "en": "OpenAI",
+        "ar": "أوبن إيه آي",
+        "base_url": "https://api.openai.com/v1",
+        "api_key_env": "OPENAI_API_KEY",
+        "default_model": OPENAI_MODEL,
+        "mode": "compatible",
+    },
+    "ollama": {
+        "en": "Ollama local",
+        "ar": "Ollama المحلي",
+        "base_url": "http://localhost:11434/v1",
+        "api_key_env": "OLLAMA_API_KEY",
+        "default_model": "qwen2.5:7b",
+        "mode": "compatible",
+    },
+    "openrouter": {
+        "en": "OpenRouter",
+        "ar": "OpenRouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "default_model": "openai/gpt-4o-mini",
+        "mode": "compatible",
+    },
+    "groq": {
+        "en": "Groq",
+        "ar": "Groq",
+        "base_url": "https://api.groq.com/openai/v1",
+        "api_key_env": "GROQ_API_KEY",
+        "default_model": "llama-3.1-70b-versatile",
+        "mode": "compatible",
+    },
+    "together": {
+        "en": "Together AI",
+        "ar": "Together AI",
+        "base_url": "https://api.together.xyz/v1",
+        "api_key_env": "TOGETHER_API_KEY",
+        "default_model": "meta-llama/Llama-3.1-70B-Instruct-Turbo",
+        "mode": "compatible",
+    },
+    "fireworks": {
+        "en": "Fireworks",
+        "ar": "Fireworks",
+        "base_url": "https://api.fireworks.ai/inference/v1",
+        "api_key_env": "FIREWORKS_API_KEY",
+        "default_model": "accounts/fireworks/models/llama-v3p1-70b-instruct",
+        "mode": "compatible",
+    },
+    "deepinfra": {
+        "en": "DeepInfra",
+        "ar": "DeepInfra",
+        "base_url": "https://api.deepinfra.com/v1/openai",
+        "api_key_env": "DEEPINFRA_API_KEY",
+        "default_model": "meta-llama/Llama-3.1-70B-Instruct",
+        "mode": "compatible",
+    },
+    "perplexity": {
+        "en": "Perplexity",
+        "ar": "Perplexity",
+        "base_url": "https://api.perplexity.ai",
+        "api_key_env": "PERPLEXITY_API_KEY",
+        "default_model": "llama-3.1-sonar-large-128k-online",
+        "mode": "compatible",
+    },
+    "mistral": {
+        "en": "Mistral",
+        "ar": "Mistral",
+        "base_url": "https://api.mistral.ai/v1",
+        "api_key_env": "MISTRAL_API_KEY",
+        "default_model": "mistral-large-latest",
+        "mode": "compatible",
+    },
+    "xai": {
+        "en": "xAI",
+        "ar": "xAI",
+        "base_url": "https://api.x.ai/v1",
+        "api_key_env": "XAI_API_KEY",
+        "default_model": "grok-2-latest",
+        "mode": "compatible",
+    },
+    "deepseek": {
+        "en": "DeepSeek",
+        "ar": "DeepSeek",
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key_env": "DEEPSEEK_API_KEY",
+        "default_model": "deepseek-chat",
+        "mode": "compatible",
+    },
+    "moonshot": {
+        "en": "Moonshot",
+        "ar": "Moonshot",
+        "base_url": "https://api.moonshot.ai/v1",
+        "api_key_env": "MOONSHOT_API_KEY",
+        "default_model": "moonshot-v1-8k",
+        "mode": "compatible",
+    },
+    "siliconflow": {
+        "en": "SiliconFlow",
+        "ar": "SiliconFlow",
+        "base_url": "https://api.siliconflow.cn/v1",
+        "api_key_env": "SILICONFLOW_API_KEY",
+        "default_model": "Qwen/Qwen2.5-72B-Instruct",
+        "mode": "compatible",
+    },
+    "novita": {
+        "en": "Novita",
+        "ar": "Novita",
+        "base_url": "https://api.novita.ai/v3/openai",
+        "api_key_env": "NOVITA_API_KEY",
+        "default_model": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+        "mode": "compatible",
+    },
+    "azure": {
+        "en": "Azure OpenAI",
+        "ar": "Azure OpenAI",
+        "base_url": "",
+        "api_key_env": "AZURE_OPENAI_API_KEY",
+        "default_model": OPENAI_MODEL,
+        "mode": "manual",
+    },
+    "anthropic": {
+        "en": "Anthropic",
+        "ar": "Anthropic",
+        "base_url": "",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "default_model": "",
+        "mode": "manual",
+    },
+    "gemini": {
+        "en": "Gemini",
+        "ar": "Gemini",
+        "base_url": "",
+        "api_key_env": "GEMINI_API_KEY",
+        "default_model": "",
+        "mode": "manual",
+    },
+    "huggingface": {
+        "en": "Hugging Face",
+        "ar": "Hugging Face",
+        "base_url": "",
+        "api_key_env": "HUGGINGFACE_API_TOKEN",
+        "default_model": "",
+        "mode": "manual",
+    },
+    "cohere": {
+        "en": "Cohere",
+        "ar": "Cohere",
+        "base_url": "",
+        "api_key_env": "COHERE_API_KEY",
+        "default_model": "",
+        "mode": "manual",
+    },
+    "custom": {
+        "en": "Custom OpenAI-compatible",
+        "ar": "مخصص متوافق مع OpenAI",
+        "base_url": "",
+        "api_key_env": "",
+        "default_model": OPENAI_MODEL,
+        "mode": "manual",
+    },
+}
+AI_PROVIDER_ALIASES = {
+    "free": "ollama",
+    "local": "ollama",
+    "freeai": "ollama",
+    "ollama-free": "ollama",
+    "default": "auto",
+    "open-ai": "openai",
+    "openrouterai": "openrouter",
+    "togetherai": "together",
+    "deep infra": "deepinfra",
+    "silicon flow": "siliconflow",
+    "huggingface": "huggingface",
+    "hf": "huggingface",
+    "azure-openai": "azure",
+}
+
 Target = Union[int, str]
 
 
@@ -477,6 +685,7 @@ class UserSettings:
     delete_source: bool
     ai_enabled: bool
     ai_model: str
+    ai_provider: str
     ai_count: int
     preferred_language: str
     ai_specialty: str
@@ -528,7 +737,7 @@ class DB:
 
 send_queues: Dict[Target, asyncio.Queue] = defaultdict(lambda: asyncio.Queue(maxsize=MAX_QUEUE_SIZE))
 sender_tasks: Dict[Target, List[asyncio.Task]] = defaultdict(list)
-_openai_client: Optional["OpenAI"] = None
+_openai_clients: Dict[Tuple[str, str], "OpenAI"] = {}
 global_send_semaphore = asyncio.Semaphore(GLOBAL_SEND_LIMIT)
 chat_type_cache: Dict[str, str] = {}
 group_interlude_state: Dict[str, Dict[str, int]] = defaultdict(lambda: {"count": 0, "last": 0})
@@ -914,6 +1123,7 @@ async def init_db() -> None:
         "delete_source INTEGER DEFAULT 0, "
         "ai_enabled INTEGER DEFAULT 1, "
         "ai_model TEXT DEFAULT '', "
+        "ai_provider TEXT DEFAULT 'auto', "
         "ai_count INTEGER DEFAULT 3, "
         "preferred_language TEXT DEFAULT 'auto', "
         "ai_specialty TEXT DEFAULT '', "
@@ -935,6 +1145,7 @@ async def init_db() -> None:
     )
     await ensure_column(conn, "quizzes", "explanation", "TEXT DEFAULT ''")
     await ensure_column(conn, "quizzes", "created_at", "INTEGER DEFAULT 0")
+    await ensure_column(conn, "user_settings", "ai_provider", "TEXT DEFAULT 'auto'")
     await ensure_column(conn, "user_settings", "preferred_language", "TEXT DEFAULT 'auto'")
     await ensure_column(conn, "user_settings", "ai_specialty", "TEXT DEFAULT ''")
     await ensure_column(conn, "user_settings", "delivery_mode", "TEXT DEFAULT 'rich'")
@@ -958,8 +1169,8 @@ async def get_user_settings(user_id: int) -> UserSettings:
         default_title = legacy["title"] if legacy else ""
         await conn.execute(
             "INSERT OR IGNORE INTO user_settings("
-            "user_id, default_target, default_target_title, delete_source, ai_enabled, ai_model, ai_count, preferred_language, ai_specialty, delivery_mode, share_mode, show_explanation, confirmation_message, ai_tool_mode, fun_breaks, fun_interval, fun_style"
-            ") VALUES (?, ?, ?, ?, 1, ?, ?, 'auto', '', 'rich', 'both', 1, ?, 'quiz', 0, 6, 'mixed')",
+            "user_id, default_target, default_target_title, delete_source, ai_enabled, ai_model, ai_provider, ai_count, preferred_language, ai_specialty, delivery_mode, share_mode, show_explanation, confirmation_message, ai_tool_mode, fun_breaks, fun_interval, fun_style"
+            ") VALUES (?, ?, ?, ?, 1, ?, 'auto', ?, 'auto', '', 'rich', 'both', 1, ?, 'quiz', 0, 6, 'mixed')",
             (
                 user_id,
                 serialize_target(default_target),
@@ -979,6 +1190,7 @@ async def get_user_settings(user_id: int) -> UserSettings:
         delete_source=bool(row["delete_source"]),
         ai_enabled=bool(row["ai_enabled"]),
         ai_model=(row["ai_model"] or OPENAI_MODEL).strip() or OPENAI_MODEL,
+        ai_provider=(row["ai_provider"] or "auto").strip().lower() or "auto",
         ai_count=max(1, min(10, int(row["ai_count"] or AI_DEFAULT_COUNT))),
         preferred_language=(row["preferred_language"] or "auto").strip().lower() or "auto",
         ai_specialty=(row["ai_specialty"] or "").strip(),
@@ -1001,6 +1213,7 @@ async def update_user_settings(user_id: int, **fields) -> UserSettings:
         "delete_source": 1 if fields.get("delete_source", current.delete_source) else 0,
         "ai_enabled": 1 if fields.get("ai_enabled", current.ai_enabled) else 0,
         "ai_model": fields.get("ai_model", current.ai_model),
+        "ai_provider": normalize_ai_provider(fields.get("ai_provider", current.ai_provider)),
         "ai_count": max(1, min(10, int(fields.get("ai_count", current.ai_count)))),
         "preferred_language": (fields.get("preferred_language", current.preferred_language) or "auto").strip().lower(),
         "ai_specialty": (fields.get("ai_specialty", current.ai_specialty) or "").strip(),
@@ -1021,13 +1234,15 @@ async def update_user_settings(user_id: int, **fields) -> UserSettings:
         values["share_mode"] = "both"
     if values["ai_tool_mode"] not in AI_TOOL_CATALOG:
         values["ai_tool_mode"] = "quiz"
+    if values["ai_provider"] not in AI_PROVIDER_CATALOG:
+        values["ai_provider"] = "auto"
     if values["fun_style"] not in FUN_STYLE_CHOICES:
         values["fun_style"] = "mixed"
     conn = await DB.conn()
     await conn.execute(
         "REPLACE INTO user_settings("
-        "user_id, default_target, default_target_title, delete_source, ai_enabled, ai_model, ai_count, preferred_language, ai_specialty, delivery_mode, share_mode, show_explanation, confirmation_message, ai_tool_mode, fun_breaks, fun_interval, fun_style"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "user_id, default_target, default_target_title, delete_source, ai_enabled, ai_model, ai_provider, ai_count, preferred_language, ai_specialty, delivery_mode, share_mode, show_explanation, confirmation_message, ai_tool_mode, fun_breaks, fun_interval, fun_style"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             user_id,
             values["default_target"],
@@ -1035,6 +1250,7 @@ async def update_user_settings(user_id: int, **fields) -> UserSettings:
             values["delete_source"],
             values["ai_enabled"],
             values["ai_model"],
+            values["ai_provider"],
             values["ai_count"],
             values["preferred_language"],
             values["ai_specialty"],
@@ -1106,21 +1322,65 @@ async def record_stats(user_id: int, target: Target, chat_type: str, title: str)
     await conn.commit()
 
 
-def get_openai_client() -> Optional["OpenAI"]:
-    global _openai_client
-    api_key = AI_API_KEY or ("ollama" if OPENAI_BASE_URL else "")
+def resolve_ai_runtime(settings: Optional[UserSettings] = None, model_override: Optional[str] = None) -> Tuple[Optional[str], Optional[str], str]:
+    provider = normalize_ai_provider(settings.ai_provider if settings else "auto")
+    model = (model_override or (settings.ai_model if settings else "") or OPENAI_MODEL).strip() or OPENAI_MODEL
+
+    if provider == "ollama":
+        return "ollama", "http://localhost:11434/v1", (model_override or model or "qwen2.5:7b").strip() or "qwen2.5:7b"
+
+    preset = AI_PROVIDER_CATALOG.get(provider, AI_PROVIDER_CATALOG["auto"])
+    if preset.get("mode") != "compatible" and provider not in {"auto", "custom"}:
+        return None, None, model
+
+    base_url = (preset.get("base_url") or OPENAI_BASE_URL or "").strip()
+    api_key = ""
+    key_env = preset.get("api_key_env") or ""
+    if key_env:
+        api_key = os.getenv(key_env, "").strip()
+    if not api_key:
+        api_key = AI_API_KEY or os.getenv("OPENAI_API_KEY", "").strip()
+
+    if provider == "auto":
+        if not base_url and OPENAI_BASE_URL:
+            base_url = OPENAI_BASE_URL
+        if not api_key and AI_API_KEY:
+            api_key = AI_API_KEY
+
+    if provider == "custom":
+        base_url = OPENAI_BASE_URL
+        api_key = AI_API_KEY or os.getenv("OPENAI_API_KEY", "").strip()
+
+    if provider == "auto" and not base_url and not api_key and OPENAI_BASE_URL:
+        base_url = OPENAI_BASE_URL
+
+    if not api_key and base_url and (base_url.startswith("http://localhost") or base_url.startswith("http://127.0.0.1")):
+        api_key = "ollama"
+
+    if provider == "ollama" and not model_override and (not settings or settings.ai_model == OPENAI_MODEL):
+        model = "qwen2.5:7b"
+
+    if provider == "auto" and settings and settings.ai_model:
+        model = settings.ai_model
+
+    return api_key or None, base_url or None, model
+
+
+def get_openai_client(settings: Optional[UserSettings] = None) -> Optional["OpenAI"]:
+    api_key, base_url, _ = resolve_ai_runtime(settings)
     if not api_key or OpenAI is None:
         return None
-    if _openai_client is None:
+    cache_key = (api_key, base_url or "")
+    if cache_key not in _openai_clients:
         kwargs = {"api_key": api_key}
-        if OPENAI_BASE_URL:
-            kwargs["base_url"] = OPENAI_BASE_URL
-        _openai_client = OpenAI(**kwargs)
-    return _openai_client
+        if base_url:
+            kwargs["base_url"] = base_url
+        _openai_clients[cache_key] = OpenAI(**kwargs)
+    return _openai_clients[cache_key]
 
 
-def ai_service_available() -> bool:
-    return get_openai_client() is not None
+def ai_service_available(settings: Optional[UserSettings] = None) -> bool:
+    return get_openai_client(settings) is not None
 
 
 def normalize_ai_correct_option(value, options_len: int) -> Optional[int]:
@@ -1179,8 +1439,9 @@ async def generate_quizzes_with_ai(
     count: int,
     model: str,
     specialty: str = "",
+    settings: Optional[UserSettings] = None,
 ) -> List[Tuple[str, List[str], int, str]]:
-    client = get_openai_client()
+    client = get_openai_client(settings)
     if client is None:
         raise RuntimeError("AI is unavailable")
 
@@ -1259,8 +1520,8 @@ def build_ai_tool_prompt(tool: str, payload: str, lang: str, specialty: str) -> 
     return system_prompt, user_prompt, float(spec["temperature"]), int(spec["max_tokens"])
 
 
-async def generate_ai_tool_text(tool: str, payload: str, lang: str, model: str, specialty: str = "") -> str:
-    client = get_openai_client()
+async def generate_ai_tool_text(tool: str, payload: str, lang: str, model: str, specialty: str = "", settings: Optional[UserSettings] = None) -> str:
+    client = get_openai_client(settings)
     if client is None:
         raise RuntimeError("AI is unavailable")
     raw_tool = (tool or "").strip().lower().replace(" ", "")
@@ -1391,7 +1652,7 @@ async def maybe_send_group_interlude(
     else:
         fun_tool = selected_style if selected_style in {"joke", "riddle", "icebreaker", "poll"} else "trivia"
     text = None
-    if ai_service_available():
+    if ai_service_available(owner_settings):
         try:
             text = await generate_ai_tool_text(
                 fun_tool,
@@ -1399,6 +1660,7 @@ async def maybe_send_group_interlude(
                 lang,
                 owner_settings.ai_model,
                 owner_settings.ai_specialty,
+                settings=owner_settings,
             )
         except Exception:
             text = None
@@ -1452,9 +1714,235 @@ def build_main_keyboard(lang: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📘 Help" if lang == "en" else "📘 المساعدة", callback_data="help")],
         [InlineKeyboardButton("🧪 Examples" if lang == "en" else "🧪 أمثلة", callback_data="examples")],
         [InlineKeyboardButton("🧠 AI Tools" if lang == "en" else "🧠 أدوات الذكاء", callback_data="tools")],
+        [InlineKeyboardButton("☁️ Providers" if lang == "en" else "☁️ المزودات", callback_data="providers")],
+        [InlineKeyboardButton("🆓 Free AI" if lang == "en" else "🆓 الذكاء المجاني", callback_data="freeai")],
         [InlineKeyboardButton("🎉 Fun" if lang == "en" else "🎉 المرح", callback_data="fun")],
     ]
     return InlineKeyboardMarkup(buttons)
+
+
+def _selected_label(label: str, selected: bool) -> str:
+    return f"✅ {label}" if selected else label
+
+
+def _back_keyboard(lang: str) -> List[List[InlineKeyboardButton]]:
+    return [[
+        InlineKeyboardButton("⬅️ Back" if lang == "en" else "⬅️ رجوع", callback_data="panel:settings"),
+        InlineKeyboardButton("🏠 Home" if lang == "en" else "🏠 الرئيسية", callback_data="home"),
+    ]]
+
+
+def build_controls_keyboard(lang: str, settings: UserSettings) -> InlineKeyboardMarkup:
+    buttons = [
+        [
+            InlineKeyboardButton("🌐 Language" if lang == "en" else "🌐 اللغة", callback_data="panel:language"),
+            InlineKeyboardButton("☁️ Providers" if lang == "en" else "☁️ المزودات", callback_data="panel:providers"),
+            InlineKeyboardButton("🧠 Tools" if lang == "en" else "🧠 الأدوات", callback_data="panel:tools"),
+        ],
+        [
+            InlineKeyboardButton("⚡ Delivery" if lang == "en" else "⚡ الإرسال", callback_data="panel:delivery"),
+            InlineKeyboardButton("🔗 Share" if lang == "en" else "🔗 المشاركة", callback_data="panel:share"),
+            InlineKeyboardButton("🔢 Count" if lang == "en" else "🔢 العدد", callback_data="panel:count"),
+        ],
+        [
+            InlineKeyboardButton(_selected_label(f"AI {'ON' if settings.ai_enabled else 'OFF'}" if lang == "en" else f"الذكاء {'مفعل' if settings.ai_enabled else 'متوقف'}", settings.ai_enabled), callback_data="toggle:ai"),
+            InlineKeyboardButton(_selected_label(f"Delete {'ON' if settings.delete_source else 'OFF'}" if lang == "en" else f"الحذف {'مفعل' if settings.delete_source else 'متوقف'}", settings.delete_source), callback_data="toggle:delete"),
+            InlineKeyboardButton(_selected_label(f"Fun {'ON' if settings.fun_breaks else 'OFF'}" if lang == "en" else f"المرح {'مفعل' if settings.fun_breaks else 'متوقف'}", settings.fun_breaks), callback_data="toggle:fun"),
+        ],
+        [
+            InlineKeyboardButton(_selected_label(f"Explain {'ON' if settings.show_explanation else 'OFF'}" if lang == "en" else f"الشرح {'مفعل' if settings.show_explanation else 'متوقف'}", settings.show_explanation), callback_data="toggle:explain"),
+            InlineKeyboardButton(_selected_label(f"Confirm {'ON' if settings.confirmation_message else 'OFF'}" if lang == "en" else f"التأكيد {'مفعل' if settings.confirmation_message else 'متوقف'}", settings.confirmation_message), callback_data="toggle:confirm"),
+            InlineKeyboardButton("🆓 Free AI" if lang == "en" else "🆓 الذكاء المجاني", callback_data="freeai"),
+        ],
+        [
+            InlineKeyboardButton("📘 Help" if lang == "en" else "📘 المساعدة", callback_data="help"),
+            InlineKeyboardButton("🧪 Examples" if lang == "en" else "🧪 أمثلة", callback_data="examples"),
+            InlineKeyboardButton("🏠 Home" if lang == "en" else "🏠 الرئيسية", callback_data="home"),
+        ],
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_language_keyboard(lang: str, settings: UserSettings) -> InlineKeyboardMarkup:
+    current = settings.preferred_language
+    buttons = [
+        [
+            InlineKeyboardButton(_selected_label("Auto" if lang == "en" else "تلقائي", current == "auto"), callback_data="set:language:auto"),
+            InlineKeyboardButton(_selected_label("Arabic" if lang == "en" else "العربية", current == "ar"), callback_data="set:language:ar"),
+            InlineKeyboardButton(_selected_label("English" if lang == "en" else "الإنجليزية", current == "en"), callback_data="set:language:en"),
+        ],
+        *_back_keyboard(lang),
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_delivery_keyboard(lang: str, settings: UserSettings) -> InlineKeyboardMarkup:
+    buttons = [
+        [
+            InlineKeyboardButton(_selected_label("Fast" if lang == "en" else "سريع", settings.delivery_mode == "fast"), callback_data="set:delivery:fast"),
+            InlineKeyboardButton(_selected_label("Rich" if lang == "en" else "غني", settings.delivery_mode == "rich"), callback_data="set:delivery:rich"),
+        ],
+        *_back_keyboard(lang),
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_share_keyboard(lang: str, settings: UserSettings) -> InlineKeyboardMarkup:
+    buttons = [
+        [
+            InlineKeyboardButton(_selected_label("Telegram" if lang == "en" else "تيليجرام", settings.share_mode == "telegram"), callback_data="set:share:telegram"),
+            InlineKeyboardButton(_selected_label("Web" if lang == "en" else "الويب", settings.share_mode == "web"), callback_data="set:share:web"),
+            InlineKeyboardButton(_selected_label("Both" if lang == "en" else "الاثنان", settings.share_mode == "both"), callback_data="set:share:both"),
+        ],
+        *_back_keyboard(lang),
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_count_keyboard(lang: str, settings: UserSettings) -> InlineKeyboardMarkup:
+    buttons: List[List[InlineKeyboardButton]] = []
+    row: List[InlineKeyboardButton] = []
+    for count in range(1, 11):
+        label = _selected_label(str(count), settings.ai_count == count)
+        row.append(InlineKeyboardButton(label, callback_data=f"set:count:{count}"))
+        if len(row) == 5:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.extend(_back_keyboard(lang))
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_provider_keyboard(lang: str, settings: UserSettings) -> InlineKeyboardMarkup:
+    buttons: List[List[InlineKeyboardButton]] = []
+    row: List[InlineKeyboardButton] = []
+    current = normalize_ai_provider(settings.ai_provider)
+    for key, meta in AI_PROVIDER_CATALOG.items():
+        label = meta["ar"] if lang == "ar" else meta["en"]
+        row.append(InlineKeyboardButton(_selected_label(label, current == key), callback_data=f"set:provider:{key}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.extend(_back_keyboard(lang))
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_tools_keyboard(lang: str, settings: UserSettings) -> InlineKeyboardMarkup:
+    buttons: List[List[InlineKeyboardButton]] = []
+    row: List[InlineKeyboardButton] = []
+    current = normalize_ai_tool(settings.ai_tool_mode)
+    for key, meta in AI_TOOL_CATALOG.items():
+        label = meta["ar"] if lang == "ar" else meta["en"]
+        row.append(InlineKeyboardButton(_selected_label(label, current == key), callback_data=f"set:tool:{key}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    buttons.extend(_back_keyboard(lang))
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_fun_keyboard(lang: str, settings: UserSettings) -> InlineKeyboardMarkup:
+    buttons = [
+        [
+            InlineKeyboardButton(_selected_label("ON" if lang == "en" else "تشغيل", settings.fun_breaks), callback_data="toggle:fun"),
+            InlineKeyboardButton(_selected_label("OFF" if lang == "en" else "إيقاف", not settings.fun_breaks), callback_data="toggle:fun"),
+        ],
+        [
+            InlineKeyboardButton(_selected_label("Mixed" if lang == "en" else "متنوع", settings.fun_style == "mixed"), callback_data="set:funstyle:mixed"),
+            InlineKeyboardButton(_selected_label("Trivia" if lang == "en" else "معلومة", settings.fun_style == "trivia"), callback_data="set:funstyle:trivia"),
+            InlineKeyboardButton(_selected_label("Joke" if lang == "en" else "نكتة", settings.fun_style == "joke"), callback_data="set:funstyle:joke"),
+        ],
+        [
+            InlineKeyboardButton(_selected_label("Riddle" if lang == "en" else "لغز", settings.fun_style == "riddle"), callback_data="set:funstyle:riddle"),
+            InlineKeyboardButton(_selected_label("Icebreaker" if lang == "en" else "كسر الجليد", settings.fun_style == "icebreaker"), callback_data="set:funstyle:icebreaker"),
+            InlineKeyboardButton(_selected_label("Poll" if lang == "en" else "تصويت", settings.fun_style == "poll"), callback_data="set:funstyle:poll"),
+        ],
+        [
+            InlineKeyboardButton(_selected_label("3", settings.fun_interval == 3), callback_data="set:funrate:3"),
+            InlineKeyboardButton(_selected_label("6", settings.fun_interval == 6), callback_data="set:funrate:6"),
+            InlineKeyboardButton(_selected_label("10", settings.fun_interval == 10), callback_data="set:funrate:10"),
+            InlineKeyboardButton(_selected_label("15", settings.fun_interval == 15), callback_data="set:funrate:15"),
+            InlineKeyboardButton(_selected_label("30", settings.fun_interval == 30), callback_data="set:funrate:30"),
+        ],
+        *_back_keyboard(lang),
+    ]
+    return InlineKeyboardMarkup(buttons)
+
+
+def build_panel_content(panel: str, settings: UserSettings, lang: str) -> Tuple[str, InlineKeyboardMarkup]:
+    panel = (panel or "settings").strip().lower()
+    if panel == "language":
+        if lang == "en":
+            text = (
+                "Choose the interface language.\n"
+                f"Current: {humanize_language(settings.preferred_language, lang)}"
+            )
+        else:
+            text = (
+                "اختر لغة الواجهة.\n"
+                f"الحالية: {humanize_language(settings.preferred_language, lang)}"
+            )
+        return text, build_language_keyboard(lang, settings)
+    if panel == "providers":
+        return build_providers_text(lang), build_provider_keyboard(lang, settings)
+    if panel == "tools":
+        return build_tools_text(lang), build_tools_keyboard(lang, settings)
+    if panel == "delivery":
+        if lang == "en":
+            text = (
+                "Choose how quickly quizzes are sent.\n"
+                f"Current: {humanize_delivery_mode(settings.delivery_mode, lang)}"
+            )
+        else:
+            text = (
+                "اختر نمط الإرسال بين السرعة والشكل الغني.\n"
+                f"الحالي: {humanize_delivery_mode(settings.delivery_mode, lang)}"
+            )
+        return text, build_delivery_keyboard(lang, settings)
+    if panel == "share":
+        if lang == "en":
+            text = (
+                "Choose where share buttons appear.\n"
+                f"Current: {humanize_share_mode(settings.share_mode, lang)}"
+            )
+        else:
+            text = (
+                "اختر أين تظهر أزرار المشاركة.\n"
+                f"الحالي: {humanize_share_mode(settings.share_mode, lang)}"
+            )
+        return text, build_share_keyboard(lang, settings)
+    if panel == "count":
+        if lang == "en":
+            text = (
+                "Choose the default AI quiz batch size.\n"
+                f"Current: {settings.ai_count}"
+            )
+        else:
+            text = (
+                "اختر عدد الأسئلة الافتراضي الذي يولده الذكاء الاصطناعي.\n"
+                f"الحالي: {settings.ai_count}"
+            )
+        return text, build_count_keyboard(lang, settings)
+    if panel == "fun":
+        if lang == "en":
+            text = (
+                f"{get_text('fun_help', lang)}\n\n"
+                f"Current style: {humanize_fun_style(settings.fun_style, lang)}\n"
+                f"Current interval: {humanize_fun_interval(settings.fun_interval, lang)}"
+            )
+        else:
+            text = (
+                f"{get_text('fun_help', lang)}\n\n"
+                f"النمط الحالي: {humanize_fun_style(settings.fun_style, lang)}\n"
+                f"الفاصل الحالي: {humanize_fun_interval(settings.fun_interval, lang)}"
+            )
+        return text, build_fun_keyboard(lang, settings)
+    return build_settings_text(settings, lang), build_controls_keyboard(lang, settings)
 
 
 def humanize_toggle(value: bool, lang: str) -> str:
@@ -1494,6 +1982,18 @@ def normalize_ai_tool(value: Optional[str]) -> str:
     return AI_TOOL_ALIASES.get(tool, tool if tool in AI_TOOL_CATALOG else "quiz")
 
 
+def normalize_ai_provider(value: Optional[str]) -> str:
+    provider = (value or "auto").strip().lower().replace(" ", "")
+    provider = AI_PROVIDER_ALIASES.get(provider, provider)
+    return provider if provider in AI_PROVIDER_CATALOG else "auto"
+
+
+def resolve_ai_provider_choice(value: Optional[str]) -> Optional[str]:
+    provider = (value or "").strip().lower().replace(" ", "")
+    provider = AI_PROVIDER_ALIASES.get(provider, provider)
+    return provider if provider in AI_PROVIDER_CATALOG else None
+
+
 def resolve_ai_tool_choice(value: Optional[str]) -> Optional[str]:
     tool = (value or "").strip().lower().replace(" ", "")
     tool = AI_TOOL_ALIASES.get(tool, tool)
@@ -1512,6 +2012,12 @@ def normalize_fun_style(value: Optional[str]) -> str:
 def humanize_ai_tool(mode: str, lang: str) -> str:
     tool = normalize_ai_tool(mode)
     meta = AI_TOOL_CATALOG.get(tool, AI_TOOL_CATALOG["quiz"])
+    return meta["ar"] if lang == "ar" else meta["en"]
+
+
+def humanize_ai_provider(provider: str, lang: str) -> str:
+    normalized = normalize_ai_provider(provider)
+    meta = AI_PROVIDER_CATALOG.get(normalized, AI_PROVIDER_CATALOG["auto"])
     return meta["ar"] if lang == "ar" else meta["en"]
 
 
@@ -1538,9 +2044,10 @@ def build_settings_text(settings: UserSettings, lang: str) -> str:
         lang,
         target=format_target_label(settings.default_target, settings.default_target_title, lang),
         delete_source=humanize_toggle(settings.delete_source, lang),
-        ai_available=humanize_toggle(ai_service_available(), lang),
+        ai_available=humanize_toggle(ai_service_available(settings), lang),
         ai_enabled=humanize_toggle(settings.ai_enabled, lang),
         ai_model=settings.ai_model,
+        ai_provider=humanize_ai_provider(settings.ai_provider, lang),
         ai_count=settings.ai_count,
         language=humanize_language(settings.preferred_language, lang),
         specialty=settings.ai_specialty or ("general" if lang == "en" else "عام"),
@@ -1553,6 +2060,20 @@ def build_settings_text(settings: UserSettings, lang: str) -> str:
         fun_interval=humanize_fun_interval(settings.fun_interval, lang),
         fun_style=humanize_fun_style(settings.fun_style, lang),
     )
+
+
+def build_providers_text(lang: str) -> str:
+    lines = [get_text("providers_header", lang)]
+    for key, meta in AI_PROVIDER_CATALOG.items():
+        label = meta["ar"] if lang == "ar" else meta["en"]
+        mode = meta.get("mode", "compatible")
+        default_model = meta.get("default_model", "") or "-"
+        note = "compatible" if mode == "compatible" else "manual setup"
+        if lang == "ar":
+            note = "متوافق" if mode == "compatible" else "يتطلب إعدادًا منفصلًا"
+        extra = f" | {note} | model: {default_model}"
+        lines.append(f"- `{key}`: {label}{extra}")
+    return "\n".join(lines)
 
 
 def build_tools_text(lang: str) -> str:
@@ -1669,6 +2190,7 @@ async def _sender(target: Target, context: ContextTypes.DEFAULT_TYPE, worker_idx
                         DEFAULT_DELETE_SOURCE,
                         True,
                         OPENAI_MODEL,
+                        "auto",
                         AI_DEFAULT_COUNT,
                         "auto",
                         "",
@@ -1773,10 +2295,10 @@ async def enqueue_mcq(
     raw_message_text = extract_message_text(message)
     try:
         settings = await get_user_settings(owner_user_id) if owner_user_id else UserSettings(
-            None, "", DEFAULT_DELETE_SOURCE, True, OPENAI_MODEL, AI_DEFAULT_COUNT, "auto", "", "rich", "both", True, QUIZ_CONFIRMATION_MESSAGE, "quiz", False, 6, "mixed"
+            None, "", DEFAULT_DELETE_SOURCE, True, OPENAI_MODEL, "auto", AI_DEFAULT_COUNT, "auto", "", "rich", "both", True, QUIZ_CONFIRMATION_MESSAGE, "quiz", False, 6, "mixed"
         )
     except Exception:
-        settings = UserSettings(None, "", DEFAULT_DELETE_SOURCE, True, OPENAI_MODEL, AI_DEFAULT_COUNT, "auto", "", "rich", "both", True, QUIZ_CONFIRMATION_MESSAGE, "quiz", False, 6, "mixed")
+        settings = UserSettings(None, "", DEFAULT_DELETE_SOURCE, True, OPENAI_MODEL, "auto", AI_DEFAULT_COUNT, "auto", "", "rich", "both", True, QUIZ_CONFIRMATION_MESSAGE, "quiz", False, 6, "mixed")
     lang = settings.preferred_language if settings.preferred_language in {"ar", "en"} else infer_lang(getattr(message.from_user, "language_code", None), raw_message_text)
 
     target = explicit_target or settings.default_target or message.chat.id
@@ -1830,8 +2352,20 @@ def message_targets_bot(message: Message, bot_id: int, bot_username: str) -> boo
 
 async def show_settings(target_message: Message, user_id: int, lang: str) -> None:
     settings = await get_user_settings(user_id)
-    text = build_settings_text(settings, lang)
-    await send_text_reply(target_message, text, reply_markup=build_main_keyboard(lang))
+    text, markup = build_panel_content("settings", settings, lang)
+    await send_text_reply(target_message, text, reply_markup=markup)
+
+
+async def show_panel(target_message: Message, user_id: int, lang: str, panel: str) -> None:
+    settings = await get_user_settings(user_id)
+    text, markup = build_panel_content(panel, settings, lang)
+    await send_text_reply(target_message, text, reply_markup=markup)
+
+
+async def edit_panel(query, user_id: int, lang: str, panel: str) -> None:
+    settings = await get_user_settings(user_id)
+    text, markup = build_panel_content(panel, settings, lang)
+    await query.edit_message_text(text, reply_markup=markup)
 
 
 async def show_stats(target_message: Message, user_id: int, lang: str) -> None:
@@ -1896,6 +2430,13 @@ async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def settings_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.effective_message or not update.effective_user:
+        return
+    lang = await resolve_user_lang(update.effective_user.id, update.effective_user.language_code, extract_message_text(update.effective_message))
+    await show_settings(update.effective_message, update.effective_user.id, lang)
+
+
+async def controls_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message or not update.effective_user:
         return
     lang = await resolve_user_lang(update.effective_user.id, update.effective_user.language_code, extract_message_text(update.effective_message))
@@ -1992,13 +2533,63 @@ async def setmodel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await send_text_reply(message, get_text("model_set", lang, model=model))
 
 
+async def providers_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
+    await show_panel(message, user.id, lang, "providers")
+
+
+async def provider_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
+    raw_value = " ".join(context.args).strip()
+    provider = resolve_ai_provider_choice(raw_value)
+    if not raw_value:
+        await show_panel(message, user.id, lang, "providers")
+        return
+    if provider is None:
+        await send_text_reply(message, get_text("usage_provider", lang))
+        return
+    current = await get_user_settings(user.id)
+    suggested_model = AI_PROVIDER_CATALOG.get(provider, {}).get("default_model", "") or current.ai_model
+    if provider == "ollama" and (not suggested_model or suggested_model == OPENAI_MODEL):
+        suggested_model = "qwen2.5:7b"
+    updated = await update_user_settings(user.id, ai_provider=provider, ai_model=suggested_model or current.ai_model)
+    await send_text_reply(message, get_text("provider_set", lang, provider=humanize_ai_provider(updated.ai_provider, lang)))
+    if provider == "ollama":
+        await send_text_reply(message, get_text("provider_free", lang))
+    elif not ai_service_available(updated):
+        await send_text_reply(message, get_text("provider_missing", lang))
+
+
+async def freeai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
+    updated = await update_user_settings(user.id, ai_provider="ollama", ai_model="qwen2.5:7b", ai_enabled=True)
+    await send_text_reply(message, get_text("provider_free", lang))
+    await send_text_reply(message, get_text("free_ai_help", lang))
+    await send_text_reply(message, build_settings_text(updated, lang), reply_markup=build_controls_keyboard(lang, updated))
+
+
 async def setcount_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     user = update.effective_user
     if not message or not user:
         return
     lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
-    if not context.args or not context.args[0].isdigit():
+    if not context.args:
+        await show_panel(message, user.id, lang, "count")
+        return
+    if not context.args[0].isdigit():
         await send_text_reply(message, get_text("usage_setcount", lang))
         return
     count = max(1, min(10, int(context.args[0])))
@@ -2013,6 +2604,9 @@ async def language_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
     value = " ".join(context.args).strip().lower()
+    if not value:
+        await show_panel(message, user.id, lang, "language")
+        return
     if value not in {"auto", "ar", "en"}:
         await send_text_reply(message, get_text("usage_language", lang))
         return
@@ -2044,6 +2638,9 @@ async def delivery_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
     value = " ".join(context.args).strip().lower()
+    if not value:
+        await show_panel(message, user.id, lang, "delivery")
+        return
     if value not in {"fast", "rich"}:
         await send_text_reply(message, get_text("usage_delivery", lang))
         return
@@ -2068,6 +2665,9 @@ async def sharemode_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return
     lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
     mode = " ".join(context.args).strip().lower()
+    if not mode:
+        await show_panel(message, user.id, lang, "share")
+        return
     if mode not in {"telegram", "web", "both"}:
         await send_text_reply(message, get_text("usage_sharemode", lang))
         return
@@ -2135,9 +2735,9 @@ async def run_ai_flow(
     explicit_target: Optional[Target] = None,
 ) -> None:
     settings = await get_user_settings(owner_user_id) if owner_user_id else UserSettings(
-        None, "", DEFAULT_DELETE_SOURCE, True, OPENAI_MODEL, AI_DEFAULT_COUNT, "auto", "", "rich", "both", True, QUIZ_CONFIRMATION_MESSAGE, "quiz", False, 6, "mixed"
+        None, "", DEFAULT_DELETE_SOURCE, True, OPENAI_MODEL, "auto", AI_DEFAULT_COUNT, "auto", "", "rich", "both", True, QUIZ_CONFIRMATION_MESSAGE, "quiz", False, 6, "mixed"
     )
-    if not ai_service_available():
+    if not ai_service_available(settings):
         await send_text_reply(message, get_text("ai_disabled_global", lang))
         return
     if owner_user_id and not settings.ai_enabled:
@@ -2154,7 +2754,7 @@ async def run_ai_flow(
         status_message = await message.reply_text(get_text("ai_processing", lang))
 
     try:
-        quizzes = await generate_quizzes_with_ai(mode, clean_payload, lang, count, settings.ai_model, settings.ai_specialty)
+        quizzes = await generate_quizzes_with_ai(mode, clean_payload, lang, count, settings.ai_model, settings.ai_specialty, settings=settings)
         target = explicit_target or settings.default_target or message.chat.id
         queued = await enqueue_quiz_items(
             target=target,
@@ -2219,7 +2819,7 @@ async def run_ai_tool_flow(
     payload: str,
 ) -> None:
     settings = await get_user_settings(owner_user_id) if owner_user_id else UserSettings(
-        None, "", DEFAULT_DELETE_SOURCE, True, OPENAI_MODEL, AI_DEFAULT_COUNT, "auto", "", "rich", "both", True, QUIZ_CONFIRMATION_MESSAGE, "quiz", False, 6, "mixed"
+        None, "", DEFAULT_DELETE_SOURCE, True, OPENAI_MODEL, "auto", AI_DEFAULT_COUNT, "auto", "", "rich", "both", True, QUIZ_CONFIRMATION_MESSAGE, "quiz", False, 6, "mixed"
     )
     selected_tool = normalize_ai_tool(tool or settings.ai_tool_mode)
     if selected_tool == "quiz":
@@ -2233,7 +2833,7 @@ async def run_ai_tool_flow(
         await send_text_reply(message, get_text("ai_usage_tool", lang))
         return
 
-    if not ai_service_available():
+    if not ai_service_available(settings):
         if selected_tool in {"joke", "riddle", "icebreaker", "trivia"}:
             await send_text_reply(message, local_fun_break_message(selected_tool, lang))
         else:
@@ -2249,7 +2849,7 @@ async def run_ai_tool_flow(
         status_message = await message.reply_text(get_text("tool_processing", lang))
 
     try:
-        response_text = await generate_ai_tool_text(selected_tool, payload, lang, settings.ai_model, settings.ai_specialty)
+        response_text = await generate_ai_tool_text(selected_tool, payload, lang, settings.ai_model, settings.ai_specialty, settings=settings)
         if status_message:
             with contextlib.suppress(Exception):
                 await status_message.edit_text(response_text[:3900])
@@ -2271,7 +2871,7 @@ async def tools_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if not message or not user:
         return
     lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
-    await send_text_reply(message, build_tools_text(lang), reply_markup=build_main_keyboard(lang))
+    await show_panel(message, user.id, lang, "tools")
 
 
 async def tool_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -2282,7 +2882,10 @@ async def tool_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
     value = " ".join(context.args).strip()
     tool = resolve_ai_tool_choice(value)
-    if not value or tool is None:
+    if not value:
+        await show_panel(message, user.id, lang, "tools")
+        return
+    if tool is None:
         await send_text_reply(message, get_text("usage_tool", lang))
         return
     settings = await update_user_settings(user.id, ai_tool_mode=tool)
@@ -2321,6 +2924,9 @@ async def funmode_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
     value = " ".join(context.args).strip().lower()
+    if not value:
+        await show_panel(message, user.id, lang, "fun")
+        return
     if value not in {"on", "off"}:
         await send_text_reply(message, get_text("usage_funmode", lang))
         return
@@ -2337,7 +2943,10 @@ async def funrate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not message or not user:
         return
     lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
-    if not context.args or not context.args[0].isdigit():
+    if not context.args:
+        await show_panel(message, user.id, lang, "fun")
+        return
+    if not context.args[0].isdigit():
         await send_text_reply(message, get_text("usage_funrate", lang))
         return
     count = max(1, min(30, int(context.args[0])))
@@ -2353,7 +2962,7 @@ async def funstyle_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
     raw_value = " ".join(context.args).strip().lower()
     if not raw_value:
-        await send_text_reply(message, get_text("usage_funstyle", lang))
+        await show_panel(message, user.id, lang, "fun")
         return
     normalized = raw_value.replace(" ", "")
     if normalized not in FUN_STYLE_CHOICES and normalized not in {"fun", "random"}:
@@ -2373,6 +2982,10 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     user = update.effective_user
     lang = await resolve_user_lang(user.id, getattr(user, "language_code", None), "") if user else "en"
 
+    if data in {"home", "start"}:
+        with contextlib.suppress(Exception):
+            await query.edit_message_text(get_text("start", lang), reply_markup=build_main_keyboard(lang))
+        return
     if data == "help":
         with contextlib.suppress(Exception):
             await query.edit_message_text(get_text("help", lang), reply_markup=build_main_keyboard(lang))
@@ -2383,11 +2996,122 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         return
     if data == "tools":
         with contextlib.suppress(Exception):
-            await query.edit_message_text(build_tools_text(lang), reply_markup=build_main_keyboard(lang))
+            await edit_panel(query, user.id, lang, "tools")
+        return
+    if data == "providers":
+        with contextlib.suppress(Exception):
+            await edit_panel(query, user.id, lang, "providers")
+        return
+    if data == "freeai":
+        if user:
+            updated = await update_user_settings(user.id, ai_provider="ollama", ai_model="qwen2.5:7b", ai_enabled=True)
+            with contextlib.suppress(Exception):
+                await query.edit_message_text(build_settings_text(updated, lang), reply_markup=build_controls_keyboard(lang, updated))
         return
     if data == "fun":
         with contextlib.suppress(Exception):
-            await query.edit_message_text(get_text("fun_help", lang), reply_markup=build_main_keyboard(lang))
+            await edit_panel(query, user.id, lang, "fun")
+        return
+    if data == "settings" or data.startswith("panel:"):
+        panel = "settings" if data == "settings" else data.split(":", 1)[1]
+        if panel == "settings":
+            settings = await get_user_settings(user.id)
+            with contextlib.suppress(Exception):
+                await query.edit_message_text(build_settings_text(settings, lang), reply_markup=build_controls_keyboard(lang, settings))
+        elif panel in {"language", "providers", "tools", "delivery", "share", "count", "fun"} and user:
+            with contextlib.suppress(Exception):
+                await edit_panel(query, user.id, lang, panel)
+        else:
+            with contextlib.suppress(Exception):
+                await query.answer(get_text("unsupported", lang), show_alert=True)
+        return
+    if data.startswith("toggle:") and user:
+        action = data.split(":", 1)[1]
+        settings = await get_user_settings(user.id)
+        if action == "ai":
+            await update_user_settings(user.id, ai_enabled=not settings.ai_enabled)
+        elif action == "delete":
+            await update_user_settings(user.id, delete_source=not settings.delete_source)
+        elif action == "explain":
+            await update_user_settings(user.id, show_explanation=not settings.show_explanation)
+        elif action == "confirm":
+            await update_user_settings(user.id, confirmation_message=not settings.confirmation_message)
+        elif action == "fun":
+            await update_user_settings(user.id, fun_breaks=not settings.fun_breaks)
+        else:
+            with contextlib.suppress(Exception):
+                await query.answer(get_text("unsupported", lang), show_alert=True)
+            return
+        updated = await get_user_settings(user.id)
+        with contextlib.suppress(Exception):
+            await query.edit_message_text(build_settings_text(updated, lang), reply_markup=build_controls_keyboard(lang, updated))
+        return
+    if data.startswith("set:") and user:
+        parts = data.split(":", 2)
+        if len(parts) != 3:
+            with contextlib.suppress(Exception):
+                await query.answer(get_text("unsupported", lang), show_alert=True)
+            return
+        _, kind, value = parts
+        if kind == "language" and value in {"auto", "ar", "en"}:
+            await update_user_settings(user.id, preferred_language=value)
+            with contextlib.suppress(Exception):
+                await edit_panel(query, user.id, lang, "language")
+            return
+        if kind == "delivery" and value in {"fast", "rich"}:
+            await update_user_settings(user.id, delivery_mode=value)
+            with contextlib.suppress(Exception):
+                await edit_panel(query, user.id, lang, "delivery")
+            return
+        if kind == "share" and value in {"telegram", "web", "both"}:
+            await update_user_settings(user.id, share_mode=value)
+            with contextlib.suppress(Exception):
+                await edit_panel(query, user.id, lang, "share")
+            return
+        if kind == "count" and value.isdigit():
+            await update_user_settings(user.id, ai_count=max(1, min(10, int(value))))
+            with contextlib.suppress(Exception):
+                await edit_panel(query, user.id, lang, "count")
+            return
+        if kind == "provider":
+            provider = resolve_ai_provider_choice(value)
+            if provider is None:
+                with contextlib.suppress(Exception):
+                    await query.answer(get_text("usage_provider", lang), show_alert=True)
+                return
+            current = await get_user_settings(user.id)
+            suggested_model = AI_PROVIDER_CATALOG.get(provider, {}).get("default_model", "") or current.ai_model
+            if provider == "ollama" and (not suggested_model or suggested_model == OPENAI_MODEL):
+                suggested_model = "qwen2.5:7b"
+            await update_user_settings(user.id, ai_provider=provider, ai_model=suggested_model or current.ai_model, ai_enabled=True)
+            updated = await get_user_settings(user.id)
+            with contextlib.suppress(Exception):
+                await query.edit_message_text(build_providers_text(lang), reply_markup=build_provider_keyboard(lang, updated))
+            return
+        if kind == "tool":
+            tool = resolve_ai_tool_choice(value)
+            if tool is None:
+                with contextlib.suppress(Exception):
+                    await query.answer(get_text("usage_tool", lang), show_alert=True)
+                return
+            await update_user_settings(user.id, ai_tool_mode=tool)
+            updated = await get_user_settings(user.id)
+            with contextlib.suppress(Exception):
+                await query.edit_message_text(build_tools_text(lang), reply_markup=build_tools_keyboard(lang, updated))
+            return
+        if kind == "funstyle":
+            await update_user_settings(user.id, fun_style=normalize_fun_style(value))
+            updated = await get_user_settings(user.id)
+            with contextlib.suppress(Exception):
+                await edit_panel(query, user.id, lang, "fun")
+            return
+        if kind == "funrate" and value.isdigit():
+            await update_user_settings(user.id, fun_interval=max(1, min(30, int(value))))
+            with contextlib.suppress(Exception):
+                await edit_panel(query, user.id, lang, "fun")
+            return
+        with contextlib.suppress(Exception):
+            await query.answer(get_text("unsupported", lang), show_alert=True)
         return
     if data == "stats" and user:
         conn = await DB.conn()
@@ -2401,12 +3125,6 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
             total_targets=total_row["sent"] if total_row else 0,
             target=format_target_label(settings.default_target, settings.default_target_title, lang),
         )
-        with contextlib.suppress(Exception):
-            await query.edit_message_text(text, reply_markup=build_main_keyboard(lang))
-        return
-    if data == "settings" and user:
-        settings = await get_user_settings(user.id)
-        text = build_settings_text(settings, lang)
         with contextlib.suppress(Exception):
             await query.edit_message_text(text, reply_markup=build_main_keyboard(lang))
         return
@@ -2615,14 +3333,19 @@ def main() -> None:
     app.add_handler(CommandHandler("help", help_handler))
     app.add_handler(CommandHandler("stats", stats_handler))
     app.add_handler(CommandHandler("settings", settings_handler))
+    app.add_handler(CommandHandler("controls", controls_handler))
     app.add_handler(CommandHandler("setchannel", setchannel_handler))
     app.add_handler(CommandHandler("publishhere", publishhere_handler))
     app.add_handler(CommandHandler("clearchannel", clearchannel_handler))
     app.add_handler(CommandHandler("toggledelete", toggledelete_handler))
     app.add_handler(CommandHandler("toggleai", toggleai_handler))
     app.add_handler(CommandHandler("setmodel", setmodel_handler))
+    app.add_handler(CommandHandler("providers", providers_handler))
+    app.add_handler(CommandHandler("provider", provider_handler))
+    app.add_handler(CommandHandler("freeai", freeai_handler))
     app.add_handler(CommandHandler("setcount", setcount_handler))
     app.add_handler(CommandHandler("language", language_handler))
+    app.add_handler(CommandHandler("lang", language_handler))
     app.add_handler(CommandHandler("specialty", specialty_handler))
     app.add_handler(CommandHandler("delivery", delivery_handler))
     app.add_handler(CommandHandler("sharemode", sharemode_handler))
