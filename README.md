@@ -11,10 +11,12 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - Optional OpenAI integration for:
   - `/ai <topic>` to generate quizzes from a topic.
   - `/quizify <text>` to turn source text into quizzes.
+- Smart AI tools for summaries, translation, flashcards, simplification, riddles, jokes, icebreakers, and more.
+- Optional group entertainment breaks that appear after a configurable number of quizzes.
 - Optional free local AI through Ollama using the same OpenAI-compatible client.
 - Per-user settings for target, AI model, AI count, and source-message deletion.
 - External quiz preview pages for sharing on Telegram, WhatsApp, X, and other apps.
-- Runtime controls for share mode, explanation button, confirmation message, and health checks.
+- Runtime controls for share mode, explanation button, confirmation message, language, AI tool mode, fun breaks, and health checks.
 
 ## Required environment variables
 
@@ -61,10 +63,18 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - `/sharemode <telegram|web|both>`
 - `/toggleexplain`
 - `/toggleconfirm`
+- `/tools`
+- `/tool <mode>`
+- `/ask [tool] <text>`
+- `/funmode <on|off>`
+- `/funrate <1-30>`
+- `/funstyle <mixed|trivia|joke|riddle|icebreaker|poll>`
 - `/health`
 - `/examples`
 - `/ai <topic>`
 - `/quizify <text>` or reply to a message with `/quizify`
+
+The bot supports Arabic and English interfaces through `/language <auto|ar|en>`.
 
 ## Free local AI with Ollama
 

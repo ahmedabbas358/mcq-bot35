@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import random
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -100,6 +101,12 @@ TEXTS = {
             "/sharemode <telegram|web|both> - choose how share buttons appear\n"
             "/toggleexplain - show or hide explanation button\n"
             "/toggleconfirm - show or hide confirmation message\n"
+            "/tool <mode> - choose the default AI tool\n"
+            "/tools - list the available AI tools\n"
+            "/ask [tool] <text> - run a smart AI tool on text\n"
+            "/funmode <on|off> - enable or disable group entertainment breaks\n"
+            "/funrate <1-30> - set how often group breaks appear\n"
+            "/funstyle <mixed|trivia|joke|riddle|icebreaker|poll> - choose break style\n"
             "/health - runtime health and queue status\n"
             "/examples - show supported MCQ formats\n"
             "/ai <topic> - generate quizzes from a topic\n"
@@ -129,6 +136,12 @@ TEXTS = {
             "/sharemode <telegram|web|both> - اختيار شكل أزرار المشاركة\n"
             "/toggleexplain - إظهار أو إخفاء زر الشرح\n"
             "/toggleconfirm - إظهار أو إخفاء رسالة التأكيد\n"
+            "/tool <mode> - اختيار أداة الذكاء الاصطناعي الافتراضية\n"
+            "/tools - عرض أدوات الذكاء الاصطناعي المتاحة\n"
+            "/ask [tool] <text> - تشغيل أداة ذكية على النص\n"
+            "/funmode <on|off> - تفعيل أو إيقاف الفواصل الترفيهية في المجموعات\n"
+            "/funrate <1-30> - تحديد معدل ظهور الفاصل الترفيهي\n"
+            "/funstyle <mixed|trivia|joke|riddle|icebreaker|poll> - اختيار نمط الفاصل\n"
             "/health - حالة التشغيل والطوابير\n"
             "/examples - عرض صيغ الأسئلة المدعومة\n"
             "/ai <topic> - توليد اختبارات من موضوع\n"
@@ -179,10 +192,14 @@ TEXTS = {
             "- AI batch size: {ai_count}\n"
             "- Interface language: {language}\n"
             "- AI specialty: {specialty}\n"
+            "- AI tool: {ai_tool}\n"
             "- Delivery mode: {delivery_mode}\n"
             "- Share mode: {share_mode}\n"
             "- Show explanation button: {show_explanation}\n"
-            "- Confirmation message: {confirmation}"
+            "- Confirmation message: {confirmation}\n"
+            "- Group fun breaks: {fun_breaks}\n"
+            "- Fun interval: {fun_interval}\n"
+            "- Fun style: {fun_style}"
         ),
         "ar": (
             "الإعدادات:\n"
@@ -194,10 +211,14 @@ TEXTS = {
             "- عدد الأسئلة الافتراضي: {ai_count}\n"
             "- لغة الواجهة: {language}\n"
             "- تخصص الذكاء الاصطناعي: {specialty}\n"
+            "- أداة الذكاء الاصطناعي: {ai_tool}\n"
             "- وضع الإرسال: {delivery_mode}\n"
             "- وضع المشاركة: {share_mode}\n"
             "- إظهار زر الشرح: {show_explanation}\n"
-            "- رسالة التأكيد: {confirmation}"
+            "- رسالة التأكيد: {confirmation}\n"
+            "- الفواصل الترفيهية في المجموعات: {fun_breaks}\n"
+            "- معدل الفاصل: {fun_interval}\n"
+            "- نمط الفاصل: {fun_style}"
         ),
     },
     "target_set": {"en": "Default target updated to: {target}", "ar": "تم تحديث الوجهة الافتراضية إلى: {target}"},
@@ -221,6 +242,9 @@ TEXTS = {
         "ar": "أنشأ الذكاء الاصطناعي {count} اختباراً وتمت إضافتها إلى قائمة النشر.",
     },
     "ai_error": {"en": "AI request failed: {reason}", "ar": "فشل طلب الذكاء الاصطناعي: {reason}"},
+    "tool_processing": {"en": "Working with the selected AI tool...", "ar": "جارٍ العمل باستخدام أداة الذكاء الاصطناعي المختارة..."},
+    "tool_done": {"en": "AI response ready.", "ar": "أصبح رد الذكاء الاصطناعي جاهزاً."},
+    "tool_error": {"en": "AI tool failed: {reason}", "ar": "فشلت أداة الذكاء الاصطناعي: {reason}"},
     "ai_usage_topic": {
         "en": "Usage: /ai <topic> or send a message starting with ai:",
         "ar": "الاستخدام: /ai <topic> أو أرسل رسالة تبدأ بـ ai:",
@@ -229,6 +253,7 @@ TEXTS = {
         "en": "Usage: /quizify <text> or reply to a message with /quizify",
         "ar": "الاستخدام: /quizify <text> أو رُد على رسالة باستخدام /quizify",
     },
+    "ai_usage_tool": {"en": "Usage: /ask [tool] <text>", "ar": "الاستخدام: /ask [tool] <text>"},
     "model_set": {"en": "AI model updated to: {model}", "ar": "تم تحديث نموذج الذكاء الاصطناعي إلى: {model}"},
     "count_set": {"en": "Default AI batch size updated to: {count}", "ar": "تم تحديث العدد الافتراضي لأسئلة الذكاء الاصطناعي إلى: {count}"},
     "language_set": {"en": "Bot language updated to: {language}", "ar": "تم تحديث لغة البوت إلى: {language}"},
@@ -295,6 +320,34 @@ TEXTS = {
     "usage_setchannel": {"en": "Usage: /setchannel <chat_id|@channel|here>", "ar": "الاستخدام: /setchannel <chat_id|@channel|here>"},
     "usage_setmodel": {"en": "Usage: /setmodel <model-id>", "ar": "الاستخدام: /setmodel <model-id>"},
     "usage_setcount": {"en": "Usage: /setcount <1-10>", "ar": "الاستخدام: /setcount <1-10>"},
+    "usage_tool": {"en": "Usage: /tool <mode>", "ar": "الاستخدام: /tool <mode>"},
+    "usage_ask": {"en": "Usage: /ask [tool] <text>", "ar": "الاستخدام: /ask [tool] <text>"},
+    "usage_funmode": {"en": "Usage: /funmode <on|off>", "ar": "الاستخدام: /funmode <on|off>"},
+    "usage_funrate": {"en": "Usage: /funrate <1-30>", "ar": "الاستخدام: /funrate <1-30>"},
+    "usage_funstyle": {"en": "Usage: /funstyle <mixed|trivia|joke|riddle|icebreaker|poll>", "ar": "الاستخدام: /funstyle <mixed|trivia|joke|riddle|icebreaker|poll>"},
+    "tool_set": {"en": "AI tool updated to: {tool}", "ar": "تم تحديث أداة الذكاء الاصطناعي إلى: {tool}"},
+    "funmode_set": {"en": "Group entertainment breaks are now {state}.", "ar": "أصبحت الفواصل الترفيهية في المجموعات {state}."},
+    "funrate_set": {"en": "Fun interval updated to every {count} quizzes.", "ar": "تم تحديث معدل الفاصل إلى كل {count} أسئلة."},
+    "funstyle_set": {"en": "Fun style updated to: {style}", "ar": "تم تحديث نمط الفاصل إلى: {style}"},
+    "tools_header": {"en": "Available AI tools:", "ar": "أدوات الذكاء الاصطناعي المتاحة:"},
+    "fun_break_header": {"en": "Group break", "ar": "فاصل للمجموعة"},
+    "fun_break_label": {"en": "Quick break", "ar": "فاصل سريع"},
+    "fun_help": {
+        "en": (
+            "Group entertainment controls:\n"
+            "- /funmode on|off\n"
+            "- /funrate 1-30\n"
+            "- /funstyle mixed|trivia|joke|riddle|icebreaker|poll\n"
+            "When enabled, the bot inserts a short break after a few quizzes in groups."
+        ),
+        "ar": (
+            "تحكم الفواصل الترفيهية في المجموعات:\n"
+            "- /funmode on|off\n"
+            "- /funrate 1-30\n"
+            "- /funstyle mixed|trivia|joke|riddle|icebreaker|poll\n"
+            "عند التفعيل يضيف البوت فاصلًا قصيراً بعد عدة أسئلة في المجموعات."
+        ),
+    },
     "target_unreachable": {
         "en": "The bot could not access that target. Add the bot there first or check the ID/username.",
         "ar": "لم يتمكن البوت من الوصول إلى هذه الوجهة. أضف البوت هناك أولاً أو تحقق من المعرّف/الاسم.",
@@ -349,6 +402,71 @@ ARABIC_LETTERS = {
 QUESTION_PREFIXES = ["Q", "Question", "س", "سؤال"]
 ANSWER_KEYWORDS = ["Answer", "Ans", "Correct Answer", "الإجابة", "الجواب", "الإجابة الصحيحة"]
 
+AI_TOOL_CATALOG = {
+    "quiz": {"en": "Quiz generator", "ar": "مولد اختبارات", "desc_en": "Turn text or a topic into MCQs.", "desc_ar": "حوّل النص أو الموضوع إلى أسئلة اختيار من متعدد."},
+    "explain": {"en": "Explain", "ar": "شرح", "desc_en": "Explain the topic in a clear way.", "desc_ar": "اشرح الموضوع بطريقة واضحة."},
+    "summary": {"en": "Summary", "ar": "تلخيص", "desc_en": "Summarize long text into short points.", "desc_ar": "لخص النص الطويل في نقاط قصيرة."},
+    "translate": {"en": "Translate", "ar": "ترجمة", "desc_en": "Translate between Arabic and English.", "desc_ar": "ترجم بين العربية والإنجليزية."},
+    "flashcards": {"en": "Flashcards", "ar": "بطاقات", "desc_en": "Create study flashcards.", "desc_ar": "أنشئ بطاقات للمذاكرة."},
+    "truefalse": {"en": "True / False", "ar": "صح / خطأ", "desc_en": "Create true/false statements.", "desc_ar": "أنشئ عبارات صح أو خطأ."},
+    "shortanswer": {"en": "Short answers", "ar": "إجابات قصيرة", "desc_en": "Generate short-answer questions.", "desc_ar": "أنشئ أسئلة بإجابات قصيرة."},
+    "keypoints": {"en": "Key points", "ar": "النقاط المهمة", "desc_en": "Extract the most important points.", "desc_ar": "استخرج أهم النقاط."},
+    "glossary": {"en": "Glossary", "ar": "قاموس مصطلحات", "desc_en": "List key terms and definitions.", "desc_ar": "سرد المصطلحات المهمة وتعريفاتها."},
+    "mnemonic": {"en": "Mnemonic", "ar": "وسيلة حفظ", "desc_en": "Create memory aids.", "desc_ar": "ابتكر وسيلة تساعد على الحفظ."},
+    "analogy": {"en": "Analogy", "ar": "تشبيه", "desc_en": "Explain using a relatable analogy.", "desc_ar": "اشرح باستخدام تشبيه قريب."},
+    "simplify": {"en": "Simplify", "ar": "تبسيط", "desc_en": "Rewrite complex text in simpler language.", "desc_ar": "أعد صياغة النص المعقد بلغة أبسط."},
+    "challenge": {"en": "Challenge", "ar": "تحدي", "desc_en": "Create harder challenge questions.", "desc_ar": "أنشئ أسئلة أصعب للتحدي."},
+    "poll": {"en": "Poll idea", "ar": "فكرة تصويت", "desc_en": "Create a quick poll or opinion check.", "desc_ar": "أنشئ تصويتاً سريعاً أو سؤال رأي."},
+    "recap": {"en": "Recap sheet", "ar": "مراجعة سريعة", "desc_en": "Make a compact revision sheet.", "desc_ar": "أنشئ ورقة مراجعة مختصرة."},
+    "factcheck": {"en": "Fact check", "ar": "تحقق", "desc_en": "Check claims and flag weak spots.", "desc_ar": "تحقق من الادعاءات ونقاط الضعف."},
+    "fillblank": {"en": "Fill in blanks", "ar": "أكمل الفراغ", "desc_en": "Create cloze-style questions.", "desc_ar": "أنشئ أسئلة إكمال فراغات."},
+    "riddle": {"en": "Riddle", "ar": "لغز", "desc_en": "Create a short riddle.", "desc_ar": "أنشئ لغزاً قصيراً."},
+    "joke": {"en": "Joke", "ar": "نكتة", "desc_en": "Create a light joke or playful line.", "desc_ar": "أنشئ نكتة خفيفة أو عبارة لطيفة."},
+    "icebreaker": {"en": "Icebreaker", "ar": "كسر الجليد", "desc_en": "Create a quick group conversation prompt.", "desc_ar": "أنشئ سؤالاً سريعاً للمجموعة."},
+}
+AI_TOOL_ALIASES = {
+    "mcq": "quiz",
+    "multiplechoice": "quiz",
+    "multiple-choice": "quiz",
+    "qa": "shortanswer",
+    "question": "quiz",
+    "questions": "quiz",
+    "truefalse": "truefalse",
+    "true_false": "truefalse",
+    "keypoints": "keypoints",
+    "keypointsheet": "recap",
+    "recap": "recap",
+    "facts": "factcheck",
+    "check": "factcheck",
+    "cloze": "fillblank",
+    "blank": "fillblank",
+}
+FUN_STYLE_CHOICES = {"mixed", "trivia", "joke", "riddle", "icebreaker", "poll"}
+
+AI_TOOL_SPECS = {
+    "quiz": {"instruction": "Create exactly 4-option MCQ quizzes in JSON only.", "temperature": 0.2, "max_tokens": 2200},
+    "explain": {"instruction": "Explain the topic clearly and step by step.", "temperature": 0.2, "max_tokens": 1000},
+    "summary": {"instruction": "Summarize the input into concise bullet points.", "temperature": 0.2, "max_tokens": 900},
+    "translate": {"instruction": "Translate the input accurately without adding extra commentary.", "temperature": 0.1, "max_tokens": 900},
+    "flashcards": {"instruction": "Turn the input into study flashcards with term and meaning.", "temperature": 0.2, "max_tokens": 1100},
+    "truefalse": {"instruction": "Create a short true/false practice set.", "temperature": 0.2, "max_tokens": 900},
+    "shortanswer": {"instruction": "Create short-answer questions and model answers.", "temperature": 0.2, "max_tokens": 1000},
+    "keypoints": {"instruction": "Extract the most important points only.", "temperature": 0.2, "max_tokens": 800},
+    "glossary": {"instruction": "List the key terms and simple definitions.", "temperature": 0.2, "max_tokens": 1000},
+    "mnemonic": {"instruction": "Create easy mnemonics or memory aids.", "temperature": 0.5, "max_tokens": 800},
+    "analogy": {"instruction": "Explain the idea using a clear real-world analogy.", "temperature": 0.3, "max_tokens": 900},
+    "simplify": {"instruction": "Rewrite the content in simpler language.", "temperature": 0.2, "max_tokens": 1000},
+    "challenge": {"instruction": "Create harder challenge questions that test deep understanding.", "temperature": 0.3, "max_tokens": 1200},
+    "poll": {"instruction": "Create one short poll idea with 3 to 4 options.", "temperature": 0.4, "max_tokens": 700},
+    "recap": {"instruction": "Create a compact revision sheet with headings and bullets.", "temperature": 0.2, "max_tokens": 1000},
+    "factcheck": {"instruction": "Check claims, note what is strong, and flag uncertainties.", "temperature": 0.2, "max_tokens": 1000},
+    "fillblank": {"instruction": "Create fill-in-the-blank practice items.", "temperature": 0.2, "max_tokens": 1000},
+    "riddle": {"instruction": "Create one short riddle with a clean answer.", "temperature": 0.8, "max_tokens": 500},
+    "joke": {"instruction": "Create one clean light joke.", "temperature": 0.9, "max_tokens": 300},
+    "icebreaker": {"instruction": "Create one short group icebreaker question.", "temperature": 0.7, "max_tokens": 400},
+    "trivia": {"instruction": "Create one short trivia fact or question with a crisp answer.", "temperature": 0.7, "max_tokens": 500},
+}
+
 Target = Union[int, str]
 
 
@@ -366,6 +484,10 @@ class UserSettings:
     share_mode: str
     show_explanation: bool
     confirmation_message: bool
+    ai_tool_mode: str
+    fun_breaks: bool
+    fun_interval: int
+    fun_style: str
 
 
 @dataclass
@@ -409,6 +531,8 @@ sender_tasks: Dict[Target, List[asyncio.Task]] = defaultdict(list)
 _openai_client: Optional["OpenAI"] = None
 global_send_semaphore = asyncio.Semaphore(GLOBAL_SEND_LIMIT)
 chat_type_cache: Dict[str, str] = {}
+group_interlude_state: Dict[str, Dict[str, int]] = defaultdict(lambda: {"count": 0, "last": 0})
+group_interlude_lock = asyncio.Lock()
 
 
 def get_text(key: str, lang: str = "en", **kwargs) -> str:
@@ -796,7 +920,11 @@ async def init_db() -> None:
         "delivery_mode TEXT DEFAULT 'rich', "
         "share_mode TEXT DEFAULT 'both', "
         "show_explanation INTEGER DEFAULT 1, "
-        "confirmation_message INTEGER DEFAULT 1)"
+        "confirmation_message INTEGER DEFAULT 1, "
+        "ai_tool_mode TEXT DEFAULT 'quiz', "
+        "fun_breaks INTEGER DEFAULT 0, "
+        "fun_interval INTEGER DEFAULT 6, "
+        "fun_style TEXT DEFAULT 'mixed')"
     )
     await conn.execute(
         "CREATE TABLE IF NOT EXISTS target_stats("
@@ -813,6 +941,10 @@ async def init_db() -> None:
     await ensure_column(conn, "user_settings", "share_mode", "TEXT DEFAULT 'both'")
     await ensure_column(conn, "user_settings", "show_explanation", "INTEGER DEFAULT 1")
     await ensure_column(conn, "user_settings", "confirmation_message", "INTEGER DEFAULT 1")
+    await ensure_column(conn, "user_settings", "ai_tool_mode", "TEXT DEFAULT 'quiz'")
+    await ensure_column(conn, "user_settings", "fun_breaks", "INTEGER DEFAULT 0")
+    await ensure_column(conn, "user_settings", "fun_interval", "INTEGER DEFAULT 6")
+    await ensure_column(conn, "user_settings", "fun_style", "TEXT DEFAULT 'mixed'")
     await conn.commit()
     logger.info("DB initialized")
 
@@ -826,8 +958,8 @@ async def get_user_settings(user_id: int) -> UserSettings:
         default_title = legacy["title"] if legacy else ""
         await conn.execute(
             "INSERT OR IGNORE INTO user_settings("
-            "user_id, default_target, default_target_title, delete_source, ai_enabled, ai_model, ai_count, preferred_language, ai_specialty, delivery_mode, share_mode, show_explanation, confirmation_message"
-            ") VALUES (?, ?, ?, ?, 1, ?, ?, 'auto', '', 'rich', 'both', 1, ?)",
+            "user_id, default_target, default_target_title, delete_source, ai_enabled, ai_model, ai_count, preferred_language, ai_specialty, delivery_mode, share_mode, show_explanation, confirmation_message, ai_tool_mode, fun_breaks, fun_interval, fun_style"
+            ") VALUES (?, ?, ?, ?, 1, ?, ?, 'auto', '', 'rich', 'both', 1, ?, 'quiz', 0, 6, 'mixed')",
             (
                 user_id,
                 serialize_target(default_target),
@@ -854,6 +986,10 @@ async def get_user_settings(user_id: int) -> UserSettings:
         share_mode=(row["share_mode"] or "both").strip().lower() or "both",
         show_explanation=bool(row["show_explanation"]),
         confirmation_message=bool(row["confirmation_message"]),
+        ai_tool_mode=(row["ai_tool_mode"] or "quiz").strip().lower() or "quiz",
+        fun_breaks=bool(row["fun_breaks"]),
+        fun_interval=max(1, min(30, int(row["fun_interval"] or 6))),
+        fun_style=(row["fun_style"] or "mixed").strip().lower() or "mixed",
     )
 
 
@@ -872,6 +1008,10 @@ async def update_user_settings(user_id: int, **fields) -> UserSettings:
         "share_mode": (fields.get("share_mode", current.share_mode) or "both").strip().lower(),
         "show_explanation": 1 if fields.get("show_explanation", current.show_explanation) else 0,
         "confirmation_message": 1 if fields.get("confirmation_message", current.confirmation_message) else 0,
+        "ai_tool_mode": normalize_ai_tool(fields.get("ai_tool_mode", current.ai_tool_mode)),
+        "fun_breaks": 1 if fields.get("fun_breaks", current.fun_breaks) else 0,
+        "fun_interval": max(1, min(30, int(fields.get("fun_interval", current.fun_interval) or current.fun_interval or 6))),
+        "fun_style": normalize_fun_style(fields.get("fun_style", current.fun_style)),
     }
     if values["preferred_language"] not in {"auto", "ar", "en"}:
         values["preferred_language"] = "auto"
@@ -879,11 +1019,15 @@ async def update_user_settings(user_id: int, **fields) -> UserSettings:
         values["delivery_mode"] = "rich"
     if values["share_mode"] not in {"telegram", "web", "both"}:
         values["share_mode"] = "both"
+    if values["ai_tool_mode"] not in AI_TOOL_CATALOG:
+        values["ai_tool_mode"] = "quiz"
+    if values["fun_style"] not in FUN_STYLE_CHOICES:
+        values["fun_style"] = "mixed"
     conn = await DB.conn()
     await conn.execute(
         "REPLACE INTO user_settings("
-        "user_id, default_target, default_target_title, delete_source, ai_enabled, ai_model, ai_count, preferred_language, ai_specialty, delivery_mode, share_mode, show_explanation, confirmation_message"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "user_id, default_target, default_target_title, delete_source, ai_enabled, ai_model, ai_count, preferred_language, ai_specialty, delivery_mode, share_mode, show_explanation, confirmation_message, ai_tool_mode, fun_breaks, fun_interval, fun_style"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             user_id,
             values["default_target"],
@@ -898,6 +1042,10 @@ async def update_user_settings(user_id: int, **fields) -> UserSettings:
             values["share_mode"],
             values["show_explanation"],
             values["confirmation_message"],
+            values["ai_tool_mode"],
+            values["fun_breaks"],
+            values["fun_interval"],
+            values["fun_style"],
         ),
     )
     if values["default_target"] and re.fullmatch(r"-?\d+", values["default_target"]):
@@ -1096,6 +1244,171 @@ async def generate_quizzes_with_ai(
     return validate_ai_response(payload_json, count)
 
 
+def build_ai_tool_prompt(tool: str, payload: str, lang: str, specialty: str) -> Tuple[str, str, float, int]:
+    raw_tool = (tool or "").strip().lower().replace(" ", "")
+    selected = "trivia" if raw_tool == "trivia" else normalize_ai_tool(raw_tool)
+    spec = AI_TOOL_SPECS.get(selected, AI_TOOL_SPECS["summary"])
+    language_name = "Arabic" if lang == "ar" else "English"
+    specialty_text = specialty.strip() or ("general education" if lang == "en" else "التعليم العام")
+    system_prompt = (
+        f"You are a precise educational assistant specialized in {specialty_text}. "
+        f"Reply only in {language_name}. "
+        f"Follow this task: {spec['instruction']}"
+    )
+    user_prompt = payload.strip() or ("Give a useful response." if lang == "en" else "قدّم رداً مفيداً.")
+    return system_prompt, user_prompt, float(spec["temperature"]), int(spec["max_tokens"])
+
+
+async def generate_ai_tool_text(tool: str, payload: str, lang: str, model: str, specialty: str = "") -> str:
+    client = get_openai_client()
+    if client is None:
+        raise RuntimeError("AI is unavailable")
+    raw_tool = (tool or "").strip().lower().replace(" ", "")
+    selected = "trivia" if raw_tool == "trivia" else normalize_ai_tool(raw_tool)
+    if selected == "quiz":
+        raise ValueError("quiz tool should use quiz flow")
+
+    system_prompt, user_prompt, temperature, max_tokens = build_ai_tool_prompt(selected, payload, lang, specialty)
+
+    def _run():
+        kwargs = {
+            "model": model,
+            "store": False,
+            "input": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": temperature,
+            "max_output_tokens": max_tokens,
+        }
+        if not OPENAI_BASE_URL:
+            kwargs["reasoning"] = {"effort": OPENAI_REASONING_EFFORT}
+        try:
+            return client.responses.create(**kwargs)
+        except Exception:
+            fallback_kwargs = {
+                "model": model,
+                "store": False,
+                "input": kwargs["input"],
+            }
+            return client.responses.create(**fallback_kwargs)
+
+    response = await asyncio.to_thread(_run)
+    text = clean_json_text(getattr(response, "output_text", "") or "")
+    if not text:
+        raise ValueError("AI returned empty text")
+    return text
+
+
+def local_fun_break_message(style: str, lang: str) -> str:
+    style = normalize_fun_style(style)
+    pick = random.choice
+    banks = {
+        "trivia": {
+            "en": [
+                "Quick trivia: Honey never spoils under the right conditions.",
+                "Quick trivia: Octopuses have three hearts.",
+            ],
+            "ar": [
+                "معلومة سريعة: العسل لا يفسد بسهولة في الظروف المناسبة.",
+                "معلومة سريعة: للأخطبوط ثلاثة قلوب.",
+            ],
+        },
+        "joke": {
+            "en": [
+                "Tiny joke break: Why did the student bring a ladder? To reach the high marks.",
+                "Tiny joke break: I would tell you a chemistry joke, but I know I would get no reaction.",
+            ],
+            "ar": [
+                "فاصل لطيف: لماذا أحضر الطالب سلماً؟ ليصل إلى أعلى الدرجات.",
+                "فاصل لطيف: كنت سأقول نكتة كيمياء، لكن يبدو أن التفاعل لن يكون قوياً.",
+            ],
+        },
+        "riddle": {
+            "en": [
+                "Riddle break: I speak without a mouth and hear without ears. What am I? Echo.",
+                "Riddle break: The more you take, the more you leave behind. What is it? Footsteps.",
+            ],
+            "ar": [
+                "فاصل لغز: أتكلم بلا فم وأسمع بلا أذن. ما أنا؟ الصدى.",
+                "فاصل لغز: كلما أخذت مني أكثر، تركت خلفك أكثر. ما أنا؟ الآثار.",
+            ],
+        },
+        "icebreaker": {
+            "en": [
+                "Icebreaker: If this group could learn one new skill together this month, what should it be?",
+                "Icebreaker: Coffee, tea, or something else for your best study session?",
+            ],
+            "ar": [
+                "كسر الجليد: لو كان على هذه المجموعة تعلم مهارة واحدة هذا الشهر، فما هي؟",
+                "كسر الجليد: قهوة أم شاي أم شيء آخر لأفضل جلسة مذاكرة؟",
+            ],
+        },
+        "poll": {
+            "en": [
+                "Quick poll: What breaks your study streak most often? A) Notifications B) Fatigue C) Noise D) Phone",
+                "Quick poll: Which format helps you most? A) MCQ B) Summary C) Flashcards D) Mixed",
+            ],
+            "ar": [
+                "تصويت سريع: ما أكثر شيء يقطع تركيزك؟ أ) الإشعارات ب) التعب ج) الضوضاء د) الهاتف",
+                "تصويت سريع: أي صيغة تساعدك أكثر؟ أ) MCQ ب) ملخص ج) بطاقات د) خليط",
+            ],
+        },
+    }
+    if style == "mixed":
+        style = random.choice(["trivia", "joke", "riddle", "icebreaker", "poll"])
+    options = banks.get(style, banks["trivia"]).get(lang, banks["trivia"]["en"])
+    return pick(options)
+
+
+async def maybe_send_group_interlude(
+    context: ContextTypes.DEFAULT_TYPE,
+    target: Target,
+    target_chat_type: str,
+    owner_settings: UserSettings,
+    lang: str,
+) -> None:
+    if not owner_settings.fun_breaks or target_chat_type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
+        return
+    interval = max(1, min(30, int(owner_settings.fun_interval or 6)))
+    key = str(target)
+    should_fire = False
+    async with group_interlude_lock:
+        state = group_interlude_state[key]
+        state["count"] = int(state.get("count", 0)) + 1
+        if state["count"] >= interval:
+            now = int(time.time())
+            if now - int(state.get("last", 0)) >= 45:
+                state["count"] = 0
+                state["last"] = now
+                should_fire = True
+    if not should_fire:
+        return
+
+    selected_style = normalize_fun_style(owner_settings.fun_style)
+    if selected_style == "mixed":
+        fun_tool = random.choice(["trivia", "joke", "riddle", "icebreaker", "poll"])
+    else:
+        fun_tool = selected_style if selected_style in {"joke", "riddle", "icebreaker", "poll"} else "trivia"
+    text = None
+    if ai_service_available():
+        try:
+            text = await generate_ai_tool_text(
+                fun_tool,
+                "Create one short group break that is playful, relevant, and not distracting.",
+                lang,
+                owner_settings.ai_model,
+                owner_settings.ai_specialty,
+            )
+        except Exception:
+            text = None
+    if not text:
+        text = local_fun_break_message(selected_style, lang)
+    header = get_text("fun_break_header", lang)
+    with contextlib.suppress(Exception):
+        await context.bot.send_message(chat_id=target, text=f"{header}: {text}")
+
+
 async def resolve_target_chat(bot, target: Target) -> Optional[Tuple[Target, str]]:
     try:
         chat = await bot.get_chat(target)
@@ -1138,6 +1451,8 @@ def build_main_keyboard(lang: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📊 Stats" if lang == "en" else "📊 الإحصاءات", callback_data="stats")],
         [InlineKeyboardButton("📘 Help" if lang == "en" else "📘 المساعدة", callback_data="help")],
         [InlineKeyboardButton("🧪 Examples" if lang == "en" else "🧪 أمثلة", callback_data="examples")],
+        [InlineKeyboardButton("🧠 AI Tools" if lang == "en" else "🧠 أدوات الذكاء", callback_data="tools")],
+        [InlineKeyboardButton("🎉 Fun" if lang == "en" else "🎉 المرح", callback_data="fun")],
     ]
     return InlineKeyboardMarkup(buttons)
 
@@ -1172,6 +1487,82 @@ def humanize_delivery_mode(mode: str, lang: str) -> str:
         "rich": {"en": "rich", "ar": "غني"},
     }
     return names.get(mode, names["rich"]).get(lang, names["rich"]["en"])
+
+
+def normalize_ai_tool(value: Optional[str]) -> str:
+    tool = (value or "quiz").strip().lower().replace(" ", "")
+    return AI_TOOL_ALIASES.get(tool, tool if tool in AI_TOOL_CATALOG else "quiz")
+
+
+def resolve_ai_tool_choice(value: Optional[str]) -> Optional[str]:
+    tool = (value or "").strip().lower().replace(" ", "")
+    tool = AI_TOOL_ALIASES.get(tool, tool)
+    return tool if tool in AI_TOOL_CATALOG else None
+
+
+def normalize_fun_style(value: Optional[str]) -> str:
+    style = (value or "mixed").strip().lower().replace(" ", "")
+    if style in {"fun", "random"}:
+        return "mixed"
+    if style in {"trivia", "joke", "riddle", "icebreaker", "poll", "mixed"}:
+        return style
+    return "mixed"
+
+
+def humanize_ai_tool(mode: str, lang: str) -> str:
+    tool = normalize_ai_tool(mode)
+    meta = AI_TOOL_CATALOG.get(tool, AI_TOOL_CATALOG["quiz"])
+    return meta["ar"] if lang == "ar" else meta["en"]
+
+
+def humanize_fun_style(style: str, lang: str) -> str:
+    names = {
+        "mixed": {"en": "mixed", "ar": "متنوع"},
+        "trivia": {"en": "trivia", "ar": "معلومة سريعة"},
+        "joke": {"en": "joke", "ar": "نكتة"},
+        "riddle": {"en": "riddle", "ar": "لغز"},
+        "icebreaker": {"en": "icebreaker", "ar": "كسر الجليد"},
+        "poll": {"en": "poll", "ar": "تصويت"},
+    }
+    return names.get(style, names["mixed"]).get(lang, names["mixed"]["en"])
+
+
+def humanize_fun_interval(count: int, lang: str) -> str:
+    count = max(1, int(count))
+    return f"every {count} quizzes" if lang == "en" else f"كل {count} أسئلة"
+
+
+def build_settings_text(settings: UserSettings, lang: str) -> str:
+    return get_text(
+        "settings",
+        lang,
+        target=format_target_label(settings.default_target, settings.default_target_title, lang),
+        delete_source=humanize_toggle(settings.delete_source, lang),
+        ai_available=humanize_toggle(ai_service_available(), lang),
+        ai_enabled=humanize_toggle(settings.ai_enabled, lang),
+        ai_model=settings.ai_model,
+        ai_count=settings.ai_count,
+        language=humanize_language(settings.preferred_language, lang),
+        specialty=settings.ai_specialty or ("general" if lang == "en" else "عام"),
+        ai_tool=humanize_ai_tool(settings.ai_tool_mode, lang),
+        delivery_mode=humanize_delivery_mode(settings.delivery_mode, lang),
+        share_mode=humanize_share_mode(settings.share_mode, lang),
+        show_explanation=humanize_toggle(settings.show_explanation, lang),
+        confirmation=humanize_toggle(settings.confirmation_message, lang),
+        fun_breaks=humanize_toggle(settings.fun_breaks, lang),
+        fun_interval=humanize_fun_interval(settings.fun_interval, lang),
+        fun_style=humanize_fun_style(settings.fun_style, lang),
+    )
+
+
+def build_tools_text(lang: str) -> str:
+    lines = [get_text("tools_header", lang)]
+    for key in AI_TOOL_CATALOG:
+        meta = AI_TOOL_CATALOG[key]
+        name = meta["ar"] if lang == "ar" else meta["en"]
+        desc = meta["desc_ar"] if lang == "ar" else meta["desc_en"]
+        lines.append(f"- `{key}`: {name} - {desc}")
+    return "\n".join(lines)
 
 
 async def resolve_user_lang(user_id: int, telegram_lang: Optional[str], sample: str = "") -> str:
@@ -1285,6 +1676,10 @@ async def _sender(target: Target, context: ContextTypes.DEFAULT_TYPE, worker_idx
                         "both",
                         True,
                         QUIZ_CONFIRMATION_MESSAGE,
+                        "quiz",
+                        False,
+                        6,
+                        "mixed",
                     )
 
                     if item.delete_source and item.source_chat_id and item.source_message_id:
@@ -1313,6 +1708,8 @@ async def _sender(target: Target, context: ContextTypes.DEFAULT_TYPE, worker_idx
                                 text=get_text("quiz_sent", item.lang),
                                 reply_markup=keyboard,
                             )
+
+                    await maybe_send_group_interlude(context, target, target_chat_type, owner_settings, item.lang)
 
                     wait_interval = FAST_SEND_INTERVAL if owner_settings.delivery_mode == "fast" else SEND_INTERVAL
                     if wait_interval > 0:
@@ -1376,10 +1773,10 @@ async def enqueue_mcq(
     raw_message_text = extract_message_text(message)
     try:
         settings = await get_user_settings(owner_user_id) if owner_user_id else UserSettings(
-            None, "", DEFAULT_DELETE_SOURCE, True, OPENAI_MODEL, AI_DEFAULT_COUNT, "auto", "", "rich", "both", True, QUIZ_CONFIRMATION_MESSAGE
+            None, "", DEFAULT_DELETE_SOURCE, True, OPENAI_MODEL, AI_DEFAULT_COUNT, "auto", "", "rich", "both", True, QUIZ_CONFIRMATION_MESSAGE, "quiz", False, 6, "mixed"
         )
     except Exception:
-        settings = UserSettings(None, "", DEFAULT_DELETE_SOURCE, True, OPENAI_MODEL, AI_DEFAULT_COUNT, "auto", "", "rich", "both", True, QUIZ_CONFIRMATION_MESSAGE)
+        settings = UserSettings(None, "", DEFAULT_DELETE_SOURCE, True, OPENAI_MODEL, AI_DEFAULT_COUNT, "auto", "", "rich", "both", True, QUIZ_CONFIRMATION_MESSAGE, "quiz", False, 6, "mixed")
     lang = settings.preferred_language if settings.preferred_language in {"ar", "en"} else infer_lang(getattr(message.from_user, "language_code", None), raw_message_text)
 
     target = explicit_target or settings.default_target or message.chat.id
@@ -1433,22 +1830,7 @@ def message_targets_bot(message: Message, bot_id: int, bot_username: str) -> boo
 
 async def show_settings(target_message: Message, user_id: int, lang: str) -> None:
     settings = await get_user_settings(user_id)
-    text = get_text(
-        "settings",
-        lang,
-        target=format_target_label(settings.default_target, settings.default_target_title, lang),
-        delete_source=humanize_toggle(settings.delete_source, lang),
-        ai_available=humanize_toggle(ai_service_available(), lang),
-        ai_enabled=humanize_toggle(settings.ai_enabled, lang),
-        ai_model=settings.ai_model,
-        ai_count=settings.ai_count,
-        language=humanize_language(settings.preferred_language, lang),
-        specialty=settings.ai_specialty or ("general" if lang == "en" else "عام"),
-        delivery_mode=humanize_delivery_mode(settings.delivery_mode, lang),
-        share_mode=humanize_share_mode(settings.share_mode, lang),
-        show_explanation=humanize_toggle(settings.show_explanation, lang),
-        confirmation=humanize_toggle(settings.confirmation_message, lang),
-    )
+    text = build_settings_text(settings, lang)
     await send_text_reply(target_message, text, reply_markup=build_main_keyboard(lang))
 
 
@@ -1753,7 +2135,7 @@ async def run_ai_flow(
     explicit_target: Optional[Target] = None,
 ) -> None:
     settings = await get_user_settings(owner_user_id) if owner_user_id else UserSettings(
-        None, "", DEFAULT_DELETE_SOURCE, True, OPENAI_MODEL, AI_DEFAULT_COUNT, "auto", "", "rich", "both", True, QUIZ_CONFIRMATION_MESSAGE
+        None, "", DEFAULT_DELETE_SOURCE, True, OPENAI_MODEL, AI_DEFAULT_COUNT, "auto", "", "rich", "both", True, QUIZ_CONFIRMATION_MESSAGE, "quiz", False, 6, "mixed"
     )
     if not ai_service_available():
         await send_text_reply(message, get_text("ai_disabled_global", lang))
@@ -1780,9 +2162,9 @@ async def run_ai_flow(
             context=context,
             owner_user_id=owner_user_id,
             lang=lang,
-            source_chat_id=None,
-            source_message_id=None,
-            delete_source=False,
+            source_chat_id=message.chat.id,
+            source_message_id=message.message_id,
+            delete_source=settings.delete_source and message.chat.type != ChatType.CHANNEL,
         )
         if status_message:
             with contextlib.suppress(Exception):
@@ -1827,6 +2209,161 @@ async def quizify_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await run_ai_flow(message=message, context=context, owner_user_id=user.id, lang=lang, mode="text", payload=payload)
 
 
+async def run_ai_tool_flow(
+    *,
+    message: Message,
+    context: ContextTypes.DEFAULT_TYPE,
+    owner_user_id: int,
+    lang: str,
+    tool: str,
+    payload: str,
+) -> None:
+    settings = await get_user_settings(owner_user_id) if owner_user_id else UserSettings(
+        None, "", DEFAULT_DELETE_SOURCE, True, OPENAI_MODEL, AI_DEFAULT_COUNT, "auto", "", "rich", "both", True, QUIZ_CONFIRMATION_MESSAGE, "quiz", False, 6, "mixed"
+    )
+    selected_tool = normalize_ai_tool(tool or settings.ai_tool_mode)
+    if selected_tool == "quiz":
+        await run_ai_flow(message=message, context=context, owner_user_id=owner_user_id, lang=lang, mode="text", payload=payload)
+        return
+
+    if not payload and message.reply_to_message:
+        payload = extract_message_text(message.reply_to_message)
+
+    if not payload:
+        await send_text_reply(message, get_text("ai_usage_tool", lang))
+        return
+
+    if not ai_service_available():
+        if selected_tool in {"joke", "riddle", "icebreaker", "trivia"}:
+            await send_text_reply(message, local_fun_break_message(selected_tool, lang))
+        else:
+            await send_text_reply(message, get_text("ai_disabled_global", lang))
+        return
+
+    if owner_user_id and not settings.ai_enabled:
+        await send_text_reply(message, get_text("ai_disabled_user", lang))
+        return
+
+    status_message = None
+    with contextlib.suppress(Exception):
+        status_message = await message.reply_text(get_text("tool_processing", lang))
+
+    try:
+        response_text = await generate_ai_tool_text(selected_tool, payload, lang, settings.ai_model, settings.ai_specialty)
+        if status_message:
+            with contextlib.suppress(Exception):
+                await status_message.edit_text(response_text[:3900])
+        else:
+            await send_text_reply(message, response_text[:3900])
+    except Exception as exc:
+        logger.exception("AI tool flow failed: %s", exc)
+        error_text = get_text("tool_error", lang, reason=str(exc)[:180])
+        if status_message:
+            with contextlib.suppress(Exception):
+                await status_message.edit_text(error_text)
+        else:
+            await send_text_reply(message, error_text)
+
+
+async def tools_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
+    await send_text_reply(message, build_tools_text(lang), reply_markup=build_main_keyboard(lang))
+
+
+async def tool_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
+    value = " ".join(context.args).strip()
+    tool = resolve_ai_tool_choice(value)
+    if not value or tool is None:
+        await send_text_reply(message, get_text("usage_tool", lang))
+        return
+    settings = await update_user_settings(user.id, ai_tool_mode=tool)
+    await send_text_reply(message, get_text("tool_set", lang, tool=humanize_ai_tool(settings.ai_tool_mode, lang)))
+
+
+async def ask_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
+    args = list(context.args or [])
+    settings = await get_user_settings(user.id)
+    tool = settings.ai_tool_mode
+    payload = " ".join(args).strip()
+    if args:
+        first = resolve_ai_tool_choice(args[0])
+        if first and len(args) > 1:
+            tool = first
+            payload = " ".join(args[1:]).strip()
+        elif args[0].lower().startswith("tool:"):
+            maybe_tool = resolve_ai_tool_choice(args[0].split(":", 1)[1])
+            if maybe_tool:
+                tool = maybe_tool
+                payload = " ".join(args[1:]).strip()
+    if not payload and message.reply_to_message:
+        payload = extract_message_text(message.reply_to_message)
+    await run_ai_tool_flow(message=message, context=context, owner_user_id=user.id, lang=lang, tool=tool, payload=payload)
+
+
+async def funmode_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
+    value = " ".join(context.args).strip().lower()
+    if value not in {"on", "off"}:
+        await send_text_reply(message, get_text("usage_funmode", lang))
+        return
+    settings = await update_user_settings(user.id, fun_breaks=(value == "on"))
+    state = "ON" if settings.fun_breaks else "OFF"
+    if lang == "ar":
+        state = "مفعلة" if settings.fun_breaks else "متوقفة"
+    await send_text_reply(message, get_text("funmode_set", lang, state=state))
+
+
+async def funrate_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
+    if not context.args or not context.args[0].isdigit():
+        await send_text_reply(message, get_text("usage_funrate", lang))
+        return
+    count = max(1, min(30, int(context.args[0])))
+    settings = await update_user_settings(user.id, fun_interval=count)
+    await send_text_reply(message, get_text("funrate_set", lang, count=settings.fun_interval))
+
+
+async def funstyle_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
+    raw_value = " ".join(context.args).strip().lower()
+    if not raw_value:
+        await send_text_reply(message, get_text("usage_funstyle", lang))
+        return
+    normalized = raw_value.replace(" ", "")
+    if normalized not in FUN_STYLE_CHOICES and normalized not in {"fun", "random"}:
+        await send_text_reply(message, get_text("usage_funstyle", lang))
+        return
+    value = normalize_fun_style(raw_value)
+    settings = await update_user_settings(user.id, fun_style=value)
+    await send_text_reply(message, get_text("funstyle_set", lang, style=humanize_fun_style(settings.fun_style, lang)))
+
+
 async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
@@ -1843,6 +2380,14 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     if data == "examples":
         with contextlib.suppress(Exception):
             await query.edit_message_text(f"{get_text('examples', lang)}\n\n{get_text('free_ai_help', lang)}", reply_markup=build_main_keyboard(lang))
+        return
+    if data == "tools":
+        with contextlib.suppress(Exception):
+            await query.edit_message_text(build_tools_text(lang), reply_markup=build_main_keyboard(lang))
+        return
+    if data == "fun":
+        with contextlib.suppress(Exception):
+            await query.edit_message_text(get_text("fun_help", lang), reply_markup=build_main_keyboard(lang))
         return
     if data == "stats" and user:
         conn = await DB.conn()
@@ -1861,22 +2406,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         return
     if data == "settings" and user:
         settings = await get_user_settings(user.id)
-        text = get_text(
-            "settings",
-            lang,
-            target=format_target_label(settings.default_target, settings.default_target_title, lang),
-            delete_source=humanize_toggle(settings.delete_source, lang),
-            ai_available=humanize_toggle(ai_service_available(), lang),
-            ai_enabled=humanize_toggle(settings.ai_enabled, lang),
-            ai_model=settings.ai_model,
-            ai_count=settings.ai_count,
-            language=humanize_language(settings.preferred_language, lang),
-            specialty=settings.ai_specialty or ("general" if lang == "en" else "عام"),
-            delivery_mode=humanize_delivery_mode(settings.delivery_mode, lang),
-            share_mode=humanize_share_mode(settings.share_mode, lang),
-            show_explanation=humanize_toggle(settings.show_explanation, lang),
-            confirmation=humanize_toggle(settings.confirmation_message, lang),
-        )
+        text = build_settings_text(settings, lang)
         with contextlib.suppress(Exception):
             await query.edit_message_text(text, reply_markup=build_main_keyboard(lang))
         return
@@ -2100,6 +2630,12 @@ def main() -> None:
     app.add_handler(CommandHandler("toggleconfirm", toggleconfirm_handler))
     app.add_handler(CommandHandler("health", health_handler))
     app.add_handler(CommandHandler("examples", examples_handler))
+    app.add_handler(CommandHandler("tools", tools_handler))
+    app.add_handler(CommandHandler("tool", tool_handler))
+    app.add_handler(CommandHandler("ask", ask_handler))
+    app.add_handler(CommandHandler("funmode", funmode_handler))
+    app.add_handler(CommandHandler("funrate", funrate_handler))
+    app.add_handler(CommandHandler("funstyle", funstyle_handler))
     app.add_handler(CommandHandler("ai", ai_handler))
     app.add_handler(CommandHandler("quizify", quizify_handler))
     app.add_handler(CallbackQueryHandler(callback_query_handler))
