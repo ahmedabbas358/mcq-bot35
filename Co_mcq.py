@@ -52,6 +52,13 @@ def env_bool(name: str, default: str = "false") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def env_int(name: str, default: str = "0") -> int:
+    try:
+        return int(os.getenv(name, default).strip())
+    except Exception:
+        return int(default)
+
+
 DB_PATH = os.getenv("DB_PATH", "stats.db")
 MAX_QUEUE_SIZE = int(os.getenv("MAX_QUEUE_SIZE", "200"))
 SEND_INTERVAL = float(os.getenv("SEND_INTERVAL", "0.15"))
@@ -72,6 +79,7 @@ QUIZ_CONFIRMATION_MESSAGE = env_bool("QUIZ_CONFIRMATION_MESSAGE", "true")
 ENABLE_WEB_PREVIEW = env_bool("ENABLE_WEB_PREVIEW", "true")
 AI_OFFLINE_FALLBACK = env_bool("AI_OFFLINE_FALLBACK", "true")
 PRESERVE_TARGET_ORDER = env_bool("PRESERVE_TARGET_ORDER", "true")
+AI_BACKEND_FAILURE_COOLDOWN = max(0, env_int("AI_BACKEND_FAILURE_COOLDOWN", "300"))
 CONCURRENT_UPDATES = int(os.getenv("CONCURRENT_UPDATES", "64"))
 GLOBAL_SEND_LIMIT = int(os.getenv("GLOBAL_SEND_LIMIT", "100"))
 LONG_POLL_TIMEOUT = int(os.getenv("LONG_POLL_TIMEOUT", "30"))
@@ -856,6 +864,18 @@ class SendItem:
     lang: str
 
 
+def should_delete_source_message(enabled: bool, chat_type: str, chat_id: Optional[int]) -> bool:
+    if not enabled:
+        return False
+    if chat_type == ChatType.CHANNEL:
+        return False
+    if chat_id is None:
+        return False
+    # Telegram bots can safely delete source messages in groups/supergroups,
+    # but private-chat user messages usually cannot be deleted.
+    return int(chat_id) < 0
+
+
 class DB:
     _conn: Optional[aiosqlite.Connection] = None
     _lock = asyncio.Lock()
@@ -881,6 +901,7 @@ class DB:
 send_queues: Dict[Target, asyncio.Queue] = defaultdict(lambda: asyncio.Queue(maxsize=MAX_QUEUE_SIZE))
 sender_tasks: Dict[Target, List[asyncio.Task]] = defaultdict(list)
 _openai_clients: Dict[Tuple[str, str], "OpenAI"] = {}
+_ai_backend_failure_cache: Dict[Tuple[str, str, str, str], float] = {}
 global_send_semaphore = asyncio.Semaphore(GLOBAL_SEND_LIMIT)
 chat_type_cache: Dict[str, str] = {}
 group_interlude_state: Dict[str, Dict[str, int]] = defaultdict(lambda: {"count": 0, "last": 0})
@@ -1513,7 +1534,41 @@ def resolve_ai_runtime(settings: Optional[UserSettings] = None, model_override: 
     return api_key or None, base_url or None, model
 
 
+def _ai_backend_signature(settings: Optional[UserSettings] = None, model_override: Optional[str] = None) -> Tuple[str, str, str, str]:
+    provider = normalize_runtime_provider(settings)
+    api_key, base_url, model = resolve_ai_runtime(settings, model_override)
+    return provider, api_key or "", base_url or "", model or ""
+
+
+def _prune_ai_backend_failures() -> None:
+    if not _ai_backend_failure_cache:
+        return
+    now = time.time()
+    for key, expires_at in list(_ai_backend_failure_cache.items()):
+        if expires_at <= now:
+            _ai_backend_failure_cache.pop(key, None)
+
+
+def ai_backend_temporarily_disabled(settings: Optional[UserSettings] = None, model_override: Optional[str] = None) -> bool:
+    if AI_BACKEND_FAILURE_COOLDOWN <= 0:
+        return False
+    _prune_ai_backend_failures()
+    return _ai_backend_failure_cache.get(_ai_backend_signature(settings, model_override), 0.0) > time.time()
+
+
+def mark_ai_backend_failed(settings: Optional[UserSettings] = None, model_override: Optional[str] = None) -> None:
+    if AI_BACKEND_FAILURE_COOLDOWN <= 0:
+        return
+    _ai_backend_failure_cache[_ai_backend_signature(settings, model_override)] = time.time() + AI_BACKEND_FAILURE_COOLDOWN
+
+
+def clear_ai_backend_failure(settings: Optional[UserSettings] = None, model_override: Optional[str] = None) -> None:
+    _ai_backend_failure_cache.pop(_ai_backend_signature(settings, model_override), None)
+
+
 def get_openai_client(settings: Optional[UserSettings] = None) -> Optional["OpenAI"]:
+    if ai_backend_temporarily_disabled(settings):
+        return None
     api_key, base_url, _ = resolve_ai_runtime(settings)
     if not api_key or OpenAI is None:
         return None
@@ -1625,6 +1680,7 @@ async def generate_quizzes_with_ai(
     client = get_openai_client(settings)
     if client is None:
         raise RuntimeError("AI is unavailable")
+    generate_quizzes_with_ai.last_used_fallback = False  # type: ignore[attr-defined]
 
     runtime_provider = normalize_runtime_provider(settings)
     runtime_model = resolve_runtime_model(settings, model)
@@ -1694,13 +1750,28 @@ async def generate_quizzes_with_ai(
             }
             return client.responses.create(**fallback_kwargs)
 
-    response = await asyncio.to_thread(_run)
-    raw_text = clean_json_text(extract_ai_response_text(response, gemini_runtime=(runtime_provider == "gemini")))
-    payload_json = json.loads(raw_text)
-    valid_items = validate_ai_response(payload_json, count)
-    if len(valid_items) >= count:
-        return valid_items[:count]
+    try:
+        response = await asyncio.to_thread(_run)
+    except Exception as exc:
+        if not AI_OFFLINE_FALLBACK:
+            raise
+        mark_ai_backend_failed(settings, model)
+        logger.warning("AI quiz generation fallback used after provider error: %s", exc)
+        generate_quizzes_with_ai.last_used_fallback = True  # type: ignore[attr-defined]
+        return local_quiz_pack(payload, lang, count, mode)
 
+    valid_items: List[Tuple[str, List[str], int, str]] = []
+    try:
+        raw_text = clean_json_text(extract_ai_response_text(response, gemini_runtime=(runtime_provider == "gemini")))
+        payload_json = json.loads(raw_text)
+        valid_items = validate_ai_response(payload_json, count)
+        clear_ai_backend_failure(settings, model)
+        if len(valid_items) >= count:
+            return valid_items[:count]
+    except Exception:
+        pass
+
+    fallback_used = True
     seen = {
         (
             question.strip().lower(),
@@ -1721,6 +1792,7 @@ async def generate_quizzes_with_ai(
         seen.add(signature)
         if len(valid_items) >= count:
             break
+    generate_quizzes_with_ai.last_used_fallback = fallback_used  # type: ignore[attr-defined]
     return valid_items[:count]
 
 
@@ -1743,6 +1815,7 @@ async def generate_ai_tool_text(tool: str, payload: str, lang: str, model: str, 
     client = get_openai_client(settings)
     if client is None:
         raise RuntimeError("AI is unavailable")
+    generate_ai_tool_text.last_used_fallback = False  # type: ignore[attr-defined]
     runtime_provider = normalize_runtime_provider(settings)
     runtime_model = resolve_runtime_model(settings, model)
     raw_tool = (tool or "").strip().lower().replace(" ", "")
@@ -1783,11 +1856,25 @@ async def generate_ai_tool_text(tool: str, payload: str, lang: str, model: str, 
             }
             return client.responses.create(**fallback_kwargs)
 
-    response = await asyncio.to_thread(_run)
-    text = clean_json_text(extract_ai_response_text(response, gemini_runtime=(runtime_provider == "gemini")))
-    if not text:
-        raise ValueError("AI returned empty text")
-    return text
+    try:
+        response = await asyncio.to_thread(_run)
+    except Exception as exc:
+        if not AI_OFFLINE_FALLBACK:
+            raise
+        mark_ai_backend_failed(settings, model)
+        logger.warning("AI tool fallback used after provider error: %s", exc)
+        generate_ai_tool_text.last_used_fallback = True  # type: ignore[attr-defined]
+        return local_ai_tool_text(selected, payload, lang)
+
+    try:
+        text = clean_json_text(extract_ai_response_text(response, gemini_runtime=(runtime_provider == "gemini")))
+        if not text:
+            raise ValueError("AI returned empty text")
+        clear_ai_backend_failure(settings, model)
+        return text
+    except Exception:
+        generate_ai_tool_text.last_used_fallback = True  # type: ignore[attr-defined]
+        return local_ai_tool_text(selected, payload, lang)
 
 
 def local_fun_break_message(style: str, lang: str) -> str:
@@ -1873,33 +1960,40 @@ def local_study_pack(payload: str, lang: str) -> str:
     core = lines[:4] if len(lines) >= 2 else sentences[:4]
     if not core:
         core = [text[:140]]
+    key_terms = extract_key_terms(text, 5)
     summary_items = core[:3]
     key_points = core[:4]
     topic_hint = summary_items[0][:90] if summary_items else text[:90]
 
     if lang == "ar":
+        terms_block = "\n".join(f"- {term}" for term in key_terms) if key_terms else "- مصطلحات غير واضحة"
         return (
             "حزمة مذاكرة سريعة:\n\n"
             "الملخص:\n"
             + "\n".join(f"- {item}" for item in summary_items)
             + "\n\nالنقاط المهمة:\n"
             + "\n".join(f"- {item}" for item in key_points)
+            + "\n\nالمصطلحات الرئيسية:\n"
+            + terms_block
             + "\n\nبطاقات:\n"
             + f"- س: ما الفكرة الأساسية؟\n- ج: {topic_hint}\n"
-            + f"- س: اذكر نقطة مهمة واحدة.\n- ج: {key_points[0] if key_points else topic_hint}\n\n"
+            + f"- س: اذكر مصطلحاً أساسياً من الدرس.\n- ج: {key_terms[0] if key_terms else topic_hint}\n\n"
             + "اختبار سريع:\n"
             + f"- س: ما الذي يجب تذكره من هذا النص؟\n- ج: {topic_hint}"
         )
 
+    terms_block = "\n".join(f"- {term}" for term in key_terms) if key_terms else "- No clear terms extracted"
     return (
         "Study pack:\n\n"
         "Summary:\n"
         + "\n".join(f"- {item}" for item in summary_items)
         + "\n\nKey points:\n"
         + "\n".join(f"- {item}" for item in key_points)
+        + "\n\nKey terms:\n"
+        + terms_block
         + "\n\nFlashcards:\n"
         + f"- Q: What is the main idea?\n- A: {topic_hint}\n"
-        + f"- Q: Name one important point.\n- A: {key_points[0] if key_points else topic_hint}\n\n"
+        + f"- Q: Name one key term.\n- A: {key_terms[0] if key_terms else topic_hint}\n\n"
         + "Quick quiz:\n"
         + f"- Q: What should you remember from this text?\n- A: {topic_hint}"
     )
@@ -1947,24 +2041,67 @@ def split_local_units(text: str) -> List[str]:
 
 
 def extract_key_terms(text: str, limit: int = 8) -> List[str]:
-    tokens = re.findall(r"[A-Za-z][A-Za-z0-9'-]{2,}|[\u0600-\u06FF]{2,}", text or "")
-    counts: Counter[str] = Counter()
-    first_seen: Dict[str, int] = {}
-    display: Dict[str, str] = {}
-    for index, raw in enumerate(tokens):
+    raw_tokens = re.findall(r"[A-Za-z][A-Za-z0-9'-]{2,}|[\u0600-\u06FF]{2,}|\d+(?:\.\d+)?", text or "")
+    tokens: List[Tuple[int, str, str]] = []
+    for index, raw in enumerate(raw_tokens):
         token = raw.strip("'-_")
         if not token:
             continue
         norm = token.lower()
         if norm in AI_STOPWORDS_EN or norm in AI_STOPWORDS_AR:
             continue
-        if len(norm) < 3:
+        if len(norm) < 3 and not re.fullmatch(r"\d+(?:\.\d+)?", norm):
             continue
-        counts[norm] += 1
-        first_seen.setdefault(norm, index)
-        display.setdefault(norm, token)
-    ordered = sorted(counts.keys(), key=lambda key: (-counts[key], first_seen[key]))
-    return [display[key] for key in ordered[:max(1, limit)]]
+        tokens.append((index, token, norm))
+
+    if not tokens:
+        return []
+
+    scores: Counter[str] = Counter()
+    first_seen: Dict[str, int] = {}
+    display: Dict[str, str] = {}
+
+    for index, token, norm in tokens:
+        if norm not in display:
+            display[norm] = token
+            first_seen[norm] = index
+        weight = 1.0
+        if token[:1].isupper() and token[1:].islower():
+            weight += 0.2
+        if re.fullmatch(r"\d+(?:\.\d+)?", token):
+            weight += 0.35
+        if len(token) >= 8:
+            weight += 0.1
+        scores[norm] += weight
+
+    for size, bonus in ((2, 0.8), (3, 1.1)):
+        for start in range(0, len(tokens) - size + 1):
+            window = tokens[start:start + size]
+            if any(item[2] in AI_STOPWORDS_EN or item[2] in AI_STOPWORDS_AR for item in window):
+                continue
+            phrase = " ".join(item[1] for item in window)
+            norm_phrase = _normalize_for_compare(phrase)
+            if len(norm_phrase) < 5:
+                continue
+            scores[norm_phrase] += bonus + (0.15 * size)
+            display.setdefault(norm_phrase, phrase)
+            first_seen.setdefault(norm_phrase, window[0][0])
+
+    ordered = sorted(scores.keys(), key=lambda key: (-scores[key], first_seen.get(key, 10**9), len(display.get(key, key))))
+    result: List[str] = []
+    seen_norms: set[str] = set()
+    for key in ordered:
+        candidate = display.get(key, key)
+        norm = _normalize_for_compare(candidate)
+        if not norm or norm in seen_norms:
+            continue
+        if any(norm == _normalize_for_compare(existing) for existing in result):
+            continue
+        result.append(candidate)
+        seen_norms.add(norm)
+        if len(result) >= max(1, limit):
+            break
+    return result
 
 
 def _normalize_for_compare(value: str) -> str:
@@ -2009,7 +2146,7 @@ def local_quiz_pack(payload: str, lang: str, count: int, mode: str) -> List[Tupl
         return []
     count = max(1, min(10, count))
     units = split_local_units(text)
-    terms = extract_key_terms(text, max(8, count * 3))
+    terms = extract_key_terms(text, max(10, count * 4))
     if not terms:
         terms = [units[0][:32] if units else text[:32]]
     source_hint = (units[0] if units else text)[:120]
@@ -2019,26 +2156,46 @@ def local_quiz_pack(payload: str, lang: str, count: int, mode: str) -> List[Tupl
         distractor_pool = [term for term in terms if _normalize_for_compare(term) != _normalize_for_compare(answer)]
         distractor_pool.extend(unit[:48] for unit in units if _normalize_for_compare(unit) != _normalize_for_compare(answer))
         options, correct_index = _build_local_options(answer, distractor_pool, lang)
+        snippet = units[index % len(units)] if units else text
+        style = index % 4
         if mode == "topic":
-            if lang == "ar":
-                question = f"ما الفكرة الأقرب لهذا الموضوع: {text[:80]}؟"
-                explanation = f"هذا السؤال مبني على الموضوع: {text[:120]}"
+            if style == 0:
+                question = f"ما المفهوم الأكثر ارتباطاً بهذا الموضوع: {text[:85]}؟" if lang == "ar" else f"Which concept is most closely tied to this topic: {text[:85]}?"
+            elif style == 1:
+                question = f"ما المصطلح الأفضل لتمثيل هذا الموضوع: {text[:85]}؟" if lang == "ar" else f"Which term best represents this topic: {text[:85]}?"
+            elif style == 2:
+                question = f"أي عبارة تلخص هذا الموضوع أفضل؟ {text[:85]}" if lang == "ar" else f"Which statement best summarizes this topic: {text[:85]}?"
             else:
-                question = f"What idea is most closely associated with this topic: {text[:80]}?"
-                explanation = f"This question is based on the topic: {text[:120]}"
+                question = f"أي كلمة مفتاحية تندرج تحت هذا الموضوع؟ {text[:85]}" if lang == "ar" else f"Which key term fits this topic best: {text[:85]}?"
+            explanation = f"هذا السؤال مبني على الموضوع: {text[:120]}" if lang == "ar" else f"This question is based on the topic: {text[:120]}"
         else:
-            snippet = units[index % len(units)] if units else text
-            masked = _mask_term_in_text(snippet, answer)
-            if masked == snippet:
-                if lang == "ar":
-                    question = f"ما المصطلح الأهم المرتبط بهذه الفقرة: {snippet[:90]}؟"
-                else:
-                    question = f"Which key term is most relevant to this excerpt: {snippet[:90]}?"
+            if style == 0:
+                masked = _mask_term_in_text(snippet, answer)
+                if masked == snippet:
+                    masked = _mask_term_in_text(source_hint, answer)
+                question = (
+                    f"ما الكلمة المناسبة لإكمال العبارة التالية: {masked[:100]}؟"
+                    if lang == "ar"
+                    else f"Which word best completes this line: {masked[:100]}?"
+                )
+            elif style == 1:
+                question = (
+                    f"ما المصطلح الأكثر ارتباطاً بهذه الفقرة: {snippet[:95]}؟"
+                    if lang == "ar"
+                    else f"Which term is most relevant to this excerpt: {snippet[:95]}?"
+                )
+            elif style == 2:
+                question = (
+                    f"ما الفكرة الأساسية التي يعبر عنها هذا النص: {snippet[:95]}؟"
+                    if lang == "ar"
+                    else f"What main idea does this text express: {snippet[:95]}?"
+                )
             else:
-                if lang == "ar":
-                    question = f"ما الكلمة المناسبة لإكمال العبارة التالية: {masked[:100]}؟"
-                else:
-                    question = f"Which word best completes this line: {masked[:100]}?"
+                question = (
+                    f"أي خيار يطابق هذه الفقرة بشكل أفضل: {snippet[:95]}؟"
+                    if lang == "ar"
+                    else f"Which option best matches this excerpt: {snippet[:95]}?"
+                )
             explanation = snippet[:160] or source_hint
         quizzes.append((question[:MAX_QUESTION_LENGTH], options, correct_index, explanation[:700]))
     return quizzes
@@ -2050,9 +2207,12 @@ def local_summary_text(payload: str, lang: str) -> str:
     if not units:
         return get_text("usage_study", lang)
     summary_items = units[:4]
+    key_terms = extract_key_terms(text, 4)
     if lang == "ar":
-        return "ملخص سريع:\n" + "\n".join(f"- {item}" for item in summary_items)
-    return "Quick summary:\n" + "\n".join(f"- {item}" for item in summary_items)
+        terms_block = "\n".join(f"- {term}" for term in key_terms) if key_terms else "- لا توجد مصطلحات واضحة"
+        return "ملخص سريع:\n" + "\n".join(f"- {item}" for item in summary_items) + "\n\nمصطلحات رئيسية:\n" + terms_block
+    terms_block = "\n".join(f"- {term}" for term in key_terms) if key_terms else "- No clear terms extracted"
+    return "Quick summary:\n" + "\n".join(f"- {item}" for item in summary_items) + "\n\nKey terms:\n" + terms_block
 
 
 def local_flashcards_text(payload: str, lang: str) -> str:
@@ -2814,6 +2974,7 @@ def build_ai_status_text(settings: UserSettings, lang: str) -> str:
     remote_ready = ai_service_available(settings)
     runtime_provider = normalize_runtime_provider(settings)
     runtime_model = resolve_runtime_model(settings, settings.ai_model)
+    backend_cooling_down = ai_backend_temporarily_disabled(settings, settings.ai_model)
     if lang == "ar":
         lines = [
             get_text("ai_status_header", lang),
@@ -2826,6 +2987,8 @@ def build_ai_status_text(settings: UserSettings, lang: str) -> str:
         ]
         if remote_ready:
             lines.append("- عند توفر مزود حقيقي سيستخدمه البوت مباشرة.")
+        elif backend_cooling_down:
+            lines.append("- حدث فشل حديث في الخلفية، لذلك يستخدم البوت الاحتياطي مؤقتاً لتجنب التكرار البطيء.")
         elif AI_OFFLINE_FALLBACK:
             lines.append("- إذا لم يكن هناك مزود متصل، سيعمل البوت بمحرك محلي احتياطي للأسئلة وأدوات الدراسة.")
         else:
@@ -2845,6 +3008,8 @@ def build_ai_status_text(settings: UserSettings, lang: str) -> str:
     ]
     if remote_ready:
         lines.append("- When a real provider is available, the bot uses it directly.")
+    elif backend_cooling_down:
+        lines.append("- A backend failed recently, so the bot is using the offline fallback temporarily to avoid repeated slow retries.")
     elif AI_OFFLINE_FALLBACK:
         lines.append("- If no provider is connected, the bot uses an offline engine for quizzes and study tools.")
     else:
@@ -3105,8 +3270,9 @@ async def _sender(target: Target, context: ContextTypes.DEFAULT_TYPE, worker_idx
                     )
 
                     if item.delete_source and item.source_chat_id and item.source_message_id:
-                        with contextlib.suppress(Exception):
-                            await context.bot.delete_message(chat_id=item.source_chat_id, message_id=item.source_message_id)
+                        if should_delete_source_message(item.delete_source, sent_message.chat.type, item.source_chat_id):
+                            with contextlib.suppress(Exception):
+                                await context.bot.delete_message(chat_id=item.source_chat_id, message_id=item.source_message_id)
 
                     await record_stats(
                         user_id=item.owner_user_id,
@@ -3227,7 +3393,7 @@ async def enqueue_mcq(
             lang=lang,
             source_chat_id=message.chat.id,
             source_message_id=message.message_id,
-            delete_source=settings.delete_source and message.chat.type != ChatType.CHANNEL,
+            delete_source=should_delete_source_message(settings.delete_source, message.chat.type, message.chat.id),
         )
     except asyncio.QueueFull:
         if notify_fail:
@@ -3703,6 +3869,7 @@ async def run_ai_flow(
     try:
         if remote_ai_ready:
             quizzes = await generate_quizzes_with_ai(mode, clean_payload, lang, count, settings.ai_model, settings.ai_specialty, settings=settings)
+            used_offline = used_offline or bool(getattr(generate_quizzes_with_ai, "last_used_fallback", False))
         elif AI_OFFLINE_FALLBACK:
             quizzes = local_quiz_pack(clean_payload, lang, count, mode)
         else:
@@ -3716,7 +3883,7 @@ async def run_ai_flow(
             lang=lang,
             source_chat_id=message.chat.id,
             source_message_id=message.message_id,
-            delete_source=settings.delete_source and message.chat.type != ChatType.CHANNEL,
+            delete_source=should_delete_source_message(settings.delete_source, message.chat.type, message.chat.id),
         )
         if status_message:
             with contextlib.suppress(Exception):
@@ -3749,7 +3916,7 @@ async def run_ai_flow(
                     lang=lang,
                     source_chat_id=message.chat.id,
                     source_message_id=message.message_id,
-                    delete_source=settings.delete_source and message.chat.type != ChatType.CHANNEL,
+                    delete_source=should_delete_source_message(settings.delete_source, message.chat.type, message.chat.id),
                 )
                 fallback_text = get_text("ai_done", lang, count=queued)
                 fallback_text = f"{fallback_text}\n{get_text('ai_fallback_used', lang)}"
@@ -3849,6 +4016,9 @@ async def run_ai_tool_flow(
 
     try:
         response_text = await generate_ai_tool_text(selected_tool, payload, lang, settings.ai_model, settings.ai_specialty, settings=settings)
+        used_offline_tool = bool(getattr(generate_ai_tool_text, "last_used_fallback", False))
+        if used_offline_tool:
+            response_text = f"{response_text}\n\n{get_text('ai_fallback_used', lang)}"
         if status_message:
             with contextlib.suppress(Exception):
                 await status_message.edit_text(response_text[:3900])

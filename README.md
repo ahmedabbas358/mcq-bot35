@@ -39,6 +39,7 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - `AI_MAX_SOURCE_CHARS=4000`
 - `AI_OFFLINE_FALLBACK=true`
 - `PRESERVE_TARGET_ORDER=true`
+- `AI_BACKEND_FAILURE_COOLDOWN=300`
 - `DELETE_SOURCE_MESSAGES=false`
 - `QUIZ_CONFIRMATION_MESSAGE=true`
 - `ENABLE_WEB_PREVIEW=true`
