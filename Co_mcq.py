@@ -7,7 +7,7 @@ import os
 import re
 import random
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -68,7 +68,7 @@ AI_DEFAULT_COUNT = int(os.getenv("AI_DEFAULT_COUNT", "3"))
 AI_MAX_SOURCE_CHARS = int(os.getenv("AI_MAX_SOURCE_CHARS", "4000"))
 QUIZ_CONFIRMATION_MESSAGE = env_bool("QUIZ_CONFIRMATION_MESSAGE", "true")
 ENABLE_WEB_PREVIEW = env_bool("ENABLE_WEB_PREVIEW", "true")
-PUBLIC_BASE_URL = resolve_public_base_url()
+AI_OFFLINE_FALLBACK = env_bool("AI_OFFLINE_FALLBACK", "true")
 CONCURRENT_UPDATES = int(os.getenv("CONCURRENT_UPDATES", "64"))
 GLOBAL_SEND_LIMIT = int(os.getenv("GLOBAL_SEND_LIMIT", "100"))
 LONG_POLL_TIMEOUT = int(os.getenv("LONG_POLL_TIMEOUT", "30"))
@@ -100,6 +100,9 @@ def resolve_public_base_url() -> str:
     return ""
 
 
+PUBLIC_BASE_URL = resolve_public_base_url()
+
+
 TEXTS = {
     "start": {
         "en": "MCQ Bot is ready. Send formatted MCQs, or use /ai and /quizify for AI-generated quizzes.",
@@ -126,6 +129,7 @@ TEXTS = {
             "/freeai - switch to the free local Ollama setup\n"
             "/freemodels - list the recommended free local models\n"
             "/freemodel <name> - choose a free local model\n"
+            "/aidiag - show AI status and quick fixes\n"
             "/setcount <1-10> - default AI quiz count\n"
             "/language <auto|ar|en> - choose the bot language\n"
             "/lang <auto|ar|en> - shortcut for /language\n"
@@ -169,6 +173,7 @@ TEXTS = {
             "/freeai - التبديل إلى Ollama المحلي المجاني\n"
             "/freemodels - عرض النماذج المحلية المجانية المقترحة\n"
             "/freemodel <name> - اختيار نموذج محلي مجاني\n"
+            "/aidiag - عرض حالة الذكاء الاصطناعي والإصلاحات السريعة\n"
             "/setcount <1-10> - عدد الاختبارات الافتراضي للتوليد\n"
             "/language <auto|ar|en> - اختيار لغة البوت\n"
             "/lang <auto|ar|en> - اختصار لأمر /language\n"
@@ -229,6 +234,7 @@ TEXTS = {
             "- Default target: {target}\n"
             "- Delete source after publish: {delete_source}\n"
             "- AI available: {ai_available}\n"
+            "- Offline fallback: {offline_fallback}\n"
             "- AI enabled for you: {ai_enabled}\n"
             "- AI model: {ai_model}\n"
             "- AI provider: {ai_provider}\n"
@@ -250,6 +256,7 @@ TEXTS = {
             "- الوجهة الافتراضية: {target}\n"
             "- حذف رسالة المصدر بعد النشر: {delete_source}\n"
             "- توفر خدمة الذكاء الاصطناعي: {ai_available}\n"
+            "- وضع الاحتياطي المحلي: {offline_fallback}\n"
             "- الذكاء الاصطناعي مفعل لك: {ai_enabled}\n"
             "- نموذج الذكاء الاصطناعي: {ai_model}\n"
             "- مزود الذكاء الاصطناعي: {ai_provider}\n"
@@ -283,12 +290,18 @@ TEXTS = {
         "ar": "الذكاء الاصطناعي غير متاح حالياً. أضف OPENAI_API_KEY وثبّت الاعتماديات أولاً.",
     },
     "ai_processing": {"en": "Generating quizzes with AI...", "ar": "جارٍ توليد الاختبارات بالذكاء الاصطناعي..."},
+    "ai_processing_offline": {"en": "Generating quizzes with the offline fallback engine...", "ar": "جارٍ توليد الاختبارات بالمحرك المحلي الاحتياطي..."},
     "ai_done": {
         "en": "AI created {count} quiz item(s) and queued them for publishing.",
         "ar": "أنشأ الذكاء الاصطناعي {count} اختباراً وتمت إضافتها إلى قائمة النشر.",
     },
     "ai_error": {"en": "AI request failed: {reason}", "ar": "فشل طلب الذكاء الاصطناعي: {reason}"},
+    "ai_fallback_used": {
+        "en": "No remote AI endpoint was available, so the offline study engine handled this request.",
+        "ar": "لم يكن هناك مزود ذكاء اصطناعي متاح، لذلك عالج المحرك المحلي هذا الطلب.",
+    },
     "tool_processing": {"en": "Working with the selected AI tool...", "ar": "جارٍ العمل باستخدام أداة الذكاء الاصطناعي المختارة..."},
+    "tool_processing_offline": {"en": "Working with the offline fallback engine...", "ar": "جارٍ العمل بالمحرك المحلي الاحتياطي..."},
     "tool_done": {"en": "AI response ready.", "ar": "أصبح رد الذكاء الاصطناعي جاهزاً."},
     "tool_error": {"en": "AI tool failed: {reason}", "ar": "فشلت أداة الذكاء الاصطناعي: {reason}"},
     "ai_usage_topic": {
@@ -302,7 +315,10 @@ TEXTS = {
     "ai_usage_tool": {"en": "Usage: /ask [tool] <text>", "ar": "الاستخدام: /ask [tool] <text>"},
     "model_set": {"en": "AI model updated to: {model}", "ar": "تم تحديث نموذج الذكاء الاصطناعي إلى: {model}"},
     "provider_set": {"en": "AI provider updated to: {provider}", "ar": "تم تحديث مزود الذكاء الاصطناعي إلى: {provider}"},
-    "provider_free": {"en": "Free local AI enabled with Ollama and qwen2.5:7b.", "ar": "تم تفعيل الذكاء الاصطناعي المحلي المجاني عبر Ollama و qwen2.5:7b."},
+    "provider_free": {
+        "en": "Free local AI profile selected with Ollama and qwen2.5:7b. If Ollama is not running, the offline fallback engine will handle requests.",
+        "ar": "تم اختيار ملف الذكاء المحلي المجاني عبر Ollama و qwen2.5:7b. وإذا لم يكن Ollama يعمل، فسيعالج المحرك الاحتياطي المحلي الطلبات.",
+    },
     "provider_missing": {
         "en": "This provider needs its API key or endpoint configured in environment variables.",
         "ar": "هذا المزود يحتاج إلى إعداد مفتاح API أو نقطة نهاية في متغيرات البيئة.",
@@ -409,8 +425,8 @@ TEXTS = {
         "ar": "لم يتمكن البوت من الوصول إلى هذه الوجهة. أضف البوت هناك أولاً أو تحقق من المعرّف/الاسم.",
     },
     "free_ai_help": {
-        "en": "Free local AI is available through Ollama using OPENAI_BASE_URL=http://localhost:11434/v1 and models like qwen2.5:7b, llama3.1:8b, or gemma2:9b.",
-        "ar": "يمكنك استخدام ذكاء اصطناعي مجاني محلياً عبر Ollama باستخدام OPENAI_BASE_URL=http://localhost:11434/v1 ونماذج مثل qwen2.5:7b أو llama3.1:8b أو gemma2:9b.",
+        "en": "Free local AI is available through Ollama using OPENAI_BASE_URL=http://localhost:11434/v1 and models like qwen2.5:7b, llama3.1:8b, or gemma2:9b. If no local model server is running, the bot falls back to an offline study engine for quizzes and study tools.",
+        "ar": "يمكنك استخدام ذكاء اصطناعي مجاني محلياً عبر Ollama باستخدام OPENAI_BASE_URL=http://localhost:11434/v1 ونماذج مثل qwen2.5:7b أو llama3.1:8b أو gemma2:9b. وإذا لم يكن هناك خادم نموذج محلي، فسيستخدم البوت محركاً محلياً احتياطياً للأسئلة وأدوات الدراسة.",
     },
     "free_models_header": {
         "en": "Recommended free local models:",
@@ -419,6 +435,7 @@ TEXTS = {
     "usage_freemodels": {"en": "Usage: /freemodels", "ar": "الاستخدام: /freemodels"},
     "usage_freemodel": {"en": "Usage: /freemodel <name>", "ar": "الاستخدام: /freemodel <name>"},
     "freemodel_set": {"en": "Free local model updated to: {model}", "ar": "تم تحديث النموذج المحلي المجاني إلى: {model}"},
+    "usage_aidiag": {"en": "Usage: /aidiag", "ar": "الاستخدام: /aidiag"},
     "study_help": {
         "en": (
             "Study mode creates a compact study pack from your text:\n"
@@ -439,6 +456,7 @@ TEXTS = {
     },
     "usage_study": {"en": "Usage: /study <text> or reply to a message with /study", "ar": "الاستخدام: /study <text> أو رُد على رسالة باستخدام /study"},
     "study_set": {"en": "Study pack ready.", "ar": "حزمة الدراسة جاهزة."},
+    "ai_status_header": {"en": "AI status and quick fixes:", "ar": "حالة الذكاء الاصطناعي والإصلاحات السريعة:"},
 }
 
 
@@ -1778,6 +1796,378 @@ def local_study_pack(payload: str, lang: str) -> str:
     )
 
 
+AI_STOPWORDS_EN = {
+    "the", "and", "for", "with", "that", "this", "from", "into", "about", "what", "when",
+    "where", "which", "who", "whom", "whose", "why", "how", "your", "their", "there",
+    "have", "has", "had", "was", "were", "are", "is", "be", "been", "being", "will",
+    "can", "could", "should", "would", "may", "might", "must", "not", "but", "or", "as",
+    "an", "a", "of", "to", "in", "on", "by", "at", "if", "it", "its", "we", "you", "they",
+}
+AI_STOPWORDS_AR = {
+    "في", "من", "على", "إلى", "الى", "عن", "ما", "ماذا", "متى", "أين", "كيف", "لماذا",
+    "هذا", "هذه", "ذلك", "تلك", "الذي", "التي", "الذين", "اللاتي", "اللواتي", "ال", "ثم",
+    "مع", "كان", "كانت", "يكون", "تكون", "أن", "إن", "لكن", "أو", "و", "لا", "نعم",
+}
+LOCAL_GENERIC_DISTRACTORS = {
+    "en": [
+        "A different concept",
+        "An unrelated detail",
+        "A background fact",
+        "A minor example",
+        "A broad idea",
+    ],
+    "ar": [
+        "مفهوم مختلف",
+        "تفصيل غير مرتبط",
+        "معلومة خلفية",
+        "مثال جانبي",
+        "فكرة عامة",
+    ],
+}
+
+
+def split_local_units(text: str) -> List[str]:
+    clean = " ".join((text or "").split())
+    if not clean:
+        return []
+    lines = [line.strip("-• \t") for line in (text or "").splitlines() if line.strip()]
+    if len(lines) >= 2:
+        return lines
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?؟])\s+", clean) if s.strip()]
+    return sentences if sentences else [clean]
+
+
+def extract_key_terms(text: str, limit: int = 8) -> List[str]:
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9'-]{2,}|[\u0600-\u06FF]{2,}", text or "")
+    counts: Counter[str] = Counter()
+    first_seen: Dict[str, int] = {}
+    display: Dict[str, str] = {}
+    for index, raw in enumerate(tokens):
+        token = raw.strip("'-_")
+        if not token:
+            continue
+        norm = token.lower()
+        if norm in AI_STOPWORDS_EN or norm in AI_STOPWORDS_AR:
+            continue
+        if len(norm) < 3:
+            continue
+        counts[norm] += 1
+        first_seen.setdefault(norm, index)
+        display.setdefault(norm, token)
+    ordered = sorted(counts.keys(), key=lambda key: (-counts[key], first_seen[key]))
+    return [display[key] for key in ordered[:max(1, limit)]]
+
+
+def _normalize_for_compare(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip().lower())
+
+
+def _build_local_options(answer: str, pool: List[str], lang: str) -> Tuple[List[str], int]:
+    normalized_answer = _normalize_for_compare(answer)
+    options = [answer]
+    for candidate in pool:
+        if len(options) >= 4:
+            break
+        candidate_norm = _normalize_for_compare(candidate)
+        if candidate_norm and candidate_norm != normalized_answer and candidate_norm not in {_normalize_for_compare(opt) for opt in options}:
+            options.append(candidate)
+    for generic in LOCAL_GENERIC_DISTRACTORS.get(lang, LOCAL_GENERIC_DISTRACTORS["en"]):
+        if len(options) >= 4:
+            break
+        generic_norm = _normalize_for_compare(generic)
+        if generic_norm not in {_normalize_for_compare(opt) for opt in options}:
+            options.append(generic)
+    while len(options) < 4:
+        filler = f"Option {len(options) + 1}" if lang == "en" else f"خيار {len(options) + 1}"
+        if _normalize_for_compare(filler) not in {_normalize_for_compare(opt) for opt in options}:
+            options.append(filler)
+    random.shuffle(options)
+    return options, options.index(answer)
+
+
+def _mask_term_in_text(text: str, term: str) -> str:
+    if not text or not term:
+        return text
+    pattern = re.compile(re.escape(term), re.I)
+    if pattern.search(text):
+        return pattern.sub("____", text, count=1)
+    return text
+
+
+def local_quiz_pack(payload: str, lang: str, count: int, mode: str) -> List[Tuple[str, List[str], int, str]]:
+    text = " ".join((payload or "").split())
+    if not text:
+        return []
+    count = max(1, min(10, count))
+    units = split_local_units(text)
+    terms = extract_key_terms(text, max(8, count * 3))
+    if not terms:
+        terms = [units[0][:32] if units else text[:32]]
+    source_hint = (units[0] if units else text)[:120]
+    quizzes: List[Tuple[str, List[str], int, str]] = []
+    for index in range(count):
+        answer = terms[index % len(terms)]
+        distractor_pool = [term for term in terms if _normalize_for_compare(term) != _normalize_for_compare(answer)]
+        distractor_pool.extend(unit[:48] for unit in units if _normalize_for_compare(unit) != _normalize_for_compare(answer))
+        options, correct_index = _build_local_options(answer, distractor_pool, lang)
+        if mode == "topic":
+            if lang == "ar":
+                question = f"ما الفكرة الأقرب لهذا الموضوع: {text[:80]}؟"
+                explanation = f"هذا السؤال مبني على الموضوع: {text[:120]}"
+            else:
+                question = f"What idea is most closely associated with this topic: {text[:80]}?"
+                explanation = f"This question is based on the topic: {text[:120]}"
+        else:
+            snippet = units[index % len(units)] if units else text
+            masked = _mask_term_in_text(snippet, answer)
+            if masked == snippet:
+                if lang == "ar":
+                    question = f"ما المصطلح الأهم المرتبط بهذه الفقرة: {snippet[:90]}؟"
+                else:
+                    question = f"Which key term is most relevant to this excerpt: {snippet[:90]}?"
+            else:
+                if lang == "ar":
+                    question = f"ما الكلمة المناسبة لإكمال العبارة التالية: {masked[:100]}؟"
+                else:
+                    question = f"Which word best completes this line: {masked[:100]}?"
+            explanation = snippet[:160] or source_hint
+        quizzes.append((question[:MAX_QUESTION_LENGTH], options, correct_index, explanation[:700]))
+    return quizzes
+
+
+def local_summary_text(payload: str, lang: str) -> str:
+    text = " ".join((payload or "").split())
+    units = split_local_units(text)
+    if not units:
+        return get_text("usage_study", lang)
+    summary_items = units[:4]
+    if lang == "ar":
+        return "ملخص سريع:\n" + "\n".join(f"- {item}" for item in summary_items)
+    return "Quick summary:\n" + "\n".join(f"- {item}" for item in summary_items)
+
+
+def local_flashcards_text(payload: str, lang: str) -> str:
+    text = " ".join((payload or "").split())
+    terms = extract_key_terms(text, 4)
+    if not terms:
+        return local_study_pack(payload, lang)
+    if lang == "ar":
+        lines = ["بطاقات سريعة:"]
+        for term in terms[:4]:
+            lines.append(f"- س: ما علاقة {term} بالموضوع؟")
+            lines.append(f"- ج: {term}")
+        return "\n".join(lines)
+    lines = ["Flashcards:"]
+    for term in terms[:4]:
+        lines.append(f"- Q: What is {term}?")
+        lines.append(f"- A: {term}")
+    return "\n".join(lines)
+
+
+def local_glossary_text(payload: str, lang: str) -> str:
+    text = " ".join((payload or "").split())
+    terms = extract_key_terms(text, 6)
+    if not terms:
+        return local_study_pack(payload, lang)
+    if lang == "ar":
+        lines = ["قاموس مصطلحات:"]
+        for term in terms:
+            lines.append(f"- {term}: تعريف مختصر من السياق.")
+        return "\n".join(lines)
+    lines = ["Glossary:"]
+    for term in terms:
+        lines.append(f"- {term}: brief context-based definition.")
+    return "\n".join(lines)
+
+
+def local_factcheck_text(payload: str, lang: str) -> str:
+    units = split_local_units(payload)
+    if lang == "ar":
+        return (
+            "تحقق سريع:\n"
+            + "\n".join(f"- مدعوم من النص: {item}" for item in units[:2])
+            + "\n- نقاط تحتاج مراجعة: أي ادعاءات لا تظهر بوضوح في النص."
+        )
+    return (
+        "Quick fact check:\n"
+        + "\n".join(f"- Supported by the text: {item}" for item in units[:2])
+        + "\n- Needs review: any claim not stated clearly in the source."
+    )
+
+
+def local_truefalse_text(payload: str, lang: str) -> str:
+    terms = extract_key_terms(payload, 3)
+    if not terms:
+        return local_study_pack(payload, lang)
+    if lang == "ar":
+        return (
+            "صح / خطأ:\n"
+            + "\n".join(
+                [
+                    f"- 1) {terms[0]} من الأفكار الأساسية في النص. - الإجابة: صح",
+                    f"- 2) {terms[0]} لا علاقة له بالنص. - الإجابة: خطأ",
+                    f"- 3) {terms[-1]} يظهر كفكرة مهمة. - الإجابة: صح",
+                ]
+            )
+        )
+    return (
+        "True / False practice:\n"
+        + "\n".join(
+            [
+                f"- 1) {terms[0]} is a key idea in the text. - Answer: True",
+                f"- 2) {terms[0]} is unrelated to the source. - Answer: False",
+                f"- 3) {terms[-1]} appears as an important idea. - Answer: True",
+            ]
+        )
+    )
+
+
+def local_shortanswer_text(payload: str, lang: str) -> str:
+    terms = extract_key_terms(payload, 3)
+    if not terms:
+        return local_study_pack(payload, lang)
+    if lang == "ar":
+        return (
+            "إجابات قصيرة:\n"
+            + "\n".join(f"- س: ما دور {term} في النص؟\n  ج: {term}" for term in terms[:3])
+        )
+    return (
+        "Short-answer practice:\n"
+        + "\n".join(f"- Q: What is the role of {term} in the text?\n  A: {term}" for term in terms[:3])
+    )
+
+
+def local_mnemonic_text(payload: str, lang: str) -> str:
+    terms = extract_key_terms(payload, 5)
+    if not terms:
+        return local_study_pack(payload, lang)
+    initials = "".join(term[0].upper() for term in terms if term)
+    if lang == "ar":
+        return f"وسيلة حفظ: {initials}\n- اربط الحروف الأولى بكلماتك الأساسية: {', '.join(terms)}"
+    return f"Mnemonic: {initials}\n- Link the initials to your key terms: {', '.join(terms)}"
+
+
+def local_analogy_text(payload: str, lang: str) -> str:
+    terms = extract_key_terms(payload, 2)
+    topic = terms[0] if terms else (split_local_units(payload)[0][:40] if payload else "")
+    if lang == "ar":
+        return f"تشبيه: فكر في {topic} كأنه قطعة في صورة كبيرة، كل جزء يوضح المعنى بشكل أفضل."
+    return f"Analogy: Think of {topic} like one piece in a larger puzzle, where each part makes the picture clearer."
+
+
+def local_simplify_text(payload: str, lang: str) -> str:
+    items = split_local_units(payload)
+    if not items:
+        return local_study_pack(payload, lang)
+    if lang == "ar":
+        return "تبسيط:\n" + "\n".join(f"- {item[:120]}" for item in items[:4])
+    return "Simplified version:\n" + "\n".join(f"- {item[:120]}" for item in items[:4])
+
+
+def local_poll_text(payload: str, lang: str) -> str:
+    terms = extract_key_terms(payload, 1)
+    topic = terms[0] if terms else (split_local_units(payload)[0][:40] if payload else "")
+    if lang == "ar":
+        return (
+            f"تصويت سريع حول {topic}:\n"
+            "- أ) أحتاج ملخصاً\n"
+            "- ب) أحتاج بطاقات\n"
+            "- ج) أحتاج اختباراً سريعاً\n"
+            "- د) أحتاج شرحاً أبسط"
+        )
+    return (
+        f"Quick poll about {topic}:\n"
+        "- A) I need a summary\n"
+        "- B) I need flashcards\n"
+        "- C) I need a quick quiz\n"
+        "- D) I need a simpler explanation"
+    )
+
+
+def local_challenge_text(payload: str, lang: str) -> str:
+    terms = extract_key_terms(payload, 4)
+    topic = terms[0] if terms else (split_local_units(payload)[0][:40] if payload else "")
+    if lang == "ar":
+        return (
+            f"تحدي متقدم حول {topic}:\n"
+            "- كيف تربط بين الفكرة الأساسية والتفاصيل الفرعية؟\n"
+            "- ما السؤال الذي يمكن أن يربك الطالب هنا؟\n"
+            "- كيف تشرح هذا الدرس في 30 ثانية؟"
+        )
+    return (
+        f"Challenge on {topic}:\n"
+        "- How do you connect the main idea to the supporting details?\n"
+        "- What question would most likely trip up a learner here?\n"
+        "- How would you explain this lesson in 30 seconds?"
+    )
+
+
+def local_fillblank_text(payload: str, lang: str) -> str:
+    items = split_local_units(payload)
+    terms = extract_key_terms(payload, 1)
+    if not items or not terms:
+        return local_study_pack(payload, lang)
+    sentence = items[0]
+    term = terms[0]
+    masked = _mask_term_in_text(sentence, term)
+    if lang == "ar":
+        return f"أكمل الفراغ:\n- {masked}\n- الإجابة: {term}"
+    return f"Fill in the blank:\n- {masked}\n- Answer: {term}"
+
+
+def local_translate_note(lang: str) -> str:
+    if lang == "ar":
+        return (
+            "الترجمة الدقيقة تحتاج مزوداً فعلياً للذكاء الاصطناعي.\n"
+            "إذا أردت الترجمة المجانية، فعّل Ollama محلياً أو اختر مزوداً متوافقاً من /providers."
+        )
+    return (
+        "Accurate translation needs a live AI provider.\n"
+        "For a free setup, run Ollama locally or pick a compatible provider from /providers."
+    )
+
+
+def local_ai_tool_text(tool: str, payload: str, lang: str) -> str:
+    selected = normalize_ai_tool(tool)
+    if selected in {"summary", "keypoints", "recap", "studypack"}:
+        if selected == "summary":
+            return local_summary_text(payload, lang)
+        if selected == "keypoints":
+            return local_summary_text(payload, lang)
+        if selected == "recap":
+            return local_study_pack(payload, lang)
+        return local_study_pack(payload, lang)
+    if selected == "flashcards":
+        return local_flashcards_text(payload, lang)
+    if selected == "truefalse":
+        return local_truefalse_text(payload, lang)
+    if selected == "shortanswer":
+        return local_shortanswer_text(payload, lang)
+    if selected == "glossary":
+        return local_glossary_text(payload, lang)
+    if selected == "mnemonic":
+        return local_mnemonic_text(payload, lang)
+    if selected == "analogy":
+        return local_analogy_text(payload, lang)
+    if selected == "simplify":
+        return local_simplify_text(payload, lang)
+    if selected == "challenge":
+        return local_challenge_text(payload, lang)
+    if selected == "poll":
+        return local_poll_text(payload, lang)
+    if selected == "factcheck":
+        return local_factcheck_text(payload, lang)
+    if selected == "fillblank":
+        return local_fillblank_text(payload, lang)
+    if selected == "translate":
+        return local_translate_note(lang)
+    if selected == "explain":
+        return local_summary_text(payload, lang)
+    if selected in {"trivia", "joke", "riddle", "icebreaker"}:
+        return local_fun_break_message(selected, lang)
+    return local_study_pack(payload, lang)
+
+
 async def maybe_send_group_interlude(
     context: ContextTypes.DEFAULT_TYPE,
     target: Target,
@@ -1914,7 +2304,11 @@ def build_controls_keyboard(lang: str, settings: UserSettings) -> InlineKeyboard
         [
             InlineKeyboardButton(_selected_label(f"Explain {'ON' if settings.show_explanation else 'OFF'}" if lang == "en" else f"الشرح {'مفعل' if settings.show_explanation else 'متوقف'}", settings.show_explanation), callback_data="toggle:explain"),
             InlineKeyboardButton(_selected_label(f"Confirm {'ON' if settings.confirmation_message else 'OFF'}" if lang == "en" else f"التأكيد {'مفعل' if settings.confirmation_message else 'متوقف'}", settings.confirmation_message), callback_data="toggle:confirm"),
+            InlineKeyboardButton("🩺 AI status" if lang == "en" else "🩺 حالة الذكاء", callback_data="panel:ai"),
+        ],
+        [
             InlineKeyboardButton("🆓 Free AI" if lang == "en" else "🆓 الذكاء المجاني", callback_data="freeai"),
+            InlineKeyboardButton("🧪 Free models" if lang == "en" else "🧪 النماذج المجانية", callback_data="panel:freemodels"),
         ],
         [
             InlineKeyboardButton("📘 Help" if lang == "en" else "📘 المساعدة", callback_data="help"),
@@ -2069,6 +2463,8 @@ def build_panel_content(panel: str, settings: UserSettings, lang: str) -> Tuple[
         else:
             text = f"{build_study_text(lang)}\n\nالأداة الحالية: {humanize_ai_tool(settings.ai_tool_mode, lang)}"
         return text, build_study_keyboard(lang, settings)
+    if panel == "ai":
+        return build_ai_status_text(settings, lang), build_ai_status_keyboard(lang, settings)
     if panel == "delivery":
         if lang == "en":
             text = (
@@ -2235,7 +2631,8 @@ def build_settings_text(settings: UserSettings, lang: str) -> str:
         lang,
         target=format_target_label(settings.default_target, settings.default_target_title, lang),
         delete_source=humanize_toggle(settings.delete_source, lang),
-        ai_available=humanize_toggle(ai_service_available(settings), lang),
+        ai_available=humanize_toggle(ai_service_available(settings) or AI_OFFLINE_FALLBACK, lang),
+        offline_fallback=humanize_toggle(AI_OFFLINE_FALLBACK, lang),
         ai_enabled=humanize_toggle(settings.ai_enabled, lang),
         ai_model=settings.ai_model,
         ai_provider=humanize_ai_provider(settings.ai_provider, lang),
@@ -2252,6 +2649,67 @@ def build_settings_text(settings: UserSettings, lang: str) -> str:
         fun_interval=humanize_fun_interval(settings.fun_interval, lang),
         fun_style=humanize_fun_style(settings.fun_style, lang),
     )
+
+
+def build_ai_status_text(settings: UserSettings, lang: str) -> str:
+    remote_ready = ai_service_available(settings)
+    if lang == "ar":
+        lines = [
+            get_text("ai_status_header", lang),
+            f"- المزود الحالي: {humanize_ai_provider(settings.ai_provider, lang)}",
+            f"- النموذج الحالي: {settings.ai_model}",
+            f"- الذكاء الخارجي مكوَّن: {humanize_toggle(remote_ready, lang)}",
+            f"- المحرك المحلي الاحتياطي: {humanize_toggle(AI_OFFLINE_FALLBACK, lang)}",
+            f"- تخصص الذكاء: {settings.ai_specialty or 'عام'}",
+            f"- اللغة المفضلة: {humanize_language(settings.preferred_language, lang)}",
+        ]
+        if remote_ready:
+            lines.append("- عند توفر مزود حقيقي سيستخدمه البوت مباشرة.")
+        elif AI_OFFLINE_FALLBACK:
+            lines.append("- إذا لم يكن هناك مزود متصل، سيعمل البوت بمحرك محلي احتياطي للأسئلة وأدوات الدراسة.")
+        else:
+            lines.append("- لا يوجد مزود فعّال حالياً، فعّل Ollama أو اختر مزوداً متوافقاً من لوحة المزودات.")
+        lines.append("")
+        lines.append(get_text("free_ai_help", lang))
+        return "\n".join(lines)
+
+    lines = [
+        get_text("ai_status_header", lang),
+        f"- Current provider: {humanize_ai_provider(settings.ai_provider, lang)}",
+        f"- Current model: {settings.ai_model}",
+        f"- Remote AI configured: {humanize_toggle(remote_ready, lang)}",
+        f"- Offline fallback engine: {humanize_toggle(AI_OFFLINE_FALLBACK, lang)}",
+        f"- AI specialty: {settings.ai_specialty or 'general'}",
+        f"- Preferred language: {humanize_language(settings.preferred_language, lang)}",
+    ]
+    if remote_ready:
+        lines.append("- When a real provider is available, the bot uses it directly.")
+    elif AI_OFFLINE_FALLBACK:
+        lines.append("- If no provider is connected, the bot uses an offline engine for quizzes and study tools.")
+    else:
+        lines.append("- No live provider is configured right now. Enable Ollama or pick a compatible provider from the providers panel.")
+    lines.append("")
+    lines.append(get_text("free_ai_help", lang))
+    return "\n".join(lines)
+
+
+def build_ai_status_keyboard(lang: str, settings: UserSettings) -> InlineKeyboardMarkup:
+    buttons = [
+        [
+            InlineKeyboardButton("🆓 Free AI" if lang == "en" else "🆓 الذكاء المجاني", callback_data="freeai"),
+            InlineKeyboardButton("🧪 Free models" if lang == "en" else "🧪 النماذج المجانية", callback_data="panel:freemodels"),
+        ],
+        [
+            InlineKeyboardButton("☁️ Providers" if lang == "en" else "☁️ المزودات", callback_data="panel:providers"),
+            InlineKeyboardButton("🧠 Tools" if lang == "en" else "🧠 الأدوات", callback_data="panel:tools"),
+        ],
+        [
+            InlineKeyboardButton("📚 Study" if lang == "en" else "📚 الدراسة", callback_data="study"),
+            InlineKeyboardButton("🏠 Home" if lang == "en" else "🏠 الرئيسية", callback_data="home"),
+        ],
+    ]
+    buttons.extend(_back_keyboard(lang))
+    return InlineKeyboardMarkup(buttons)
 
 
 def build_providers_text(lang: str) -> str:
@@ -2832,6 +3290,15 @@ async def freeai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await send_text_reply(message, build_settings_text(updated, lang), reply_markup=build_controls_keyboard(lang, updated))
 
 
+async def aidiag_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
+    await show_panel(message, user.id, lang, "ai")
+
+
 async def freemodels_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     user = update.effective_user
@@ -3017,9 +3484,6 @@ async def run_ai_flow(
     settings = await get_user_settings(owner_user_id) if owner_user_id else UserSettings(
         None, "", DEFAULT_DELETE_SOURCE, True, OPENAI_MODEL, "auto", AI_DEFAULT_COUNT, "auto", "", "rich", "both", True, QUIZ_CONFIRMATION_MESSAGE, "quiz", False, 6, "mixed"
     )
-    if not ai_service_available(settings):
-        await send_text_reply(message, get_text("ai_disabled_global", lang))
-        return
     if owner_user_id and not settings.ai_enabled:
         await send_text_reply(message, get_text("ai_disabled_user", lang))
         return
@@ -3030,11 +3494,19 @@ async def run_ai_flow(
         return
 
     status_message = None
+    remote_ai_ready = ai_service_available(settings)
+    used_offline = not remote_ai_ready and AI_OFFLINE_FALLBACK
     with contextlib.suppress(Exception):
-        status_message = await message.reply_text(get_text("ai_processing", lang))
+        processing_key = "ai_processing" if remote_ai_ready else ("ai_processing_offline" if AI_OFFLINE_FALLBACK else "ai_processing")
+        status_message = await message.reply_text(get_text(processing_key, lang))
 
     try:
-        quizzes = await generate_quizzes_with_ai(mode, clean_payload, lang, count, settings.ai_model, settings.ai_specialty, settings=settings)
+        if remote_ai_ready:
+            quizzes = await generate_quizzes_with_ai(mode, clean_payload, lang, count, settings.ai_model, settings.ai_specialty, settings=settings)
+        elif AI_OFFLINE_FALLBACK:
+            quizzes = local_quiz_pack(clean_payload, lang, count, mode)
+        else:
+            raise RuntimeError("AI is unavailable")
         target = explicit_target or settings.default_target or message.chat.id
         queued = await enqueue_quiz_items(
             target=target,
@@ -3048,9 +3520,15 @@ async def run_ai_flow(
         )
         if status_message:
             with contextlib.suppress(Exception):
-                await status_message.edit_text(get_text("ai_done", lang, count=queued))
+                done_text = get_text("ai_done", lang, count=queued)
+                if used_offline:
+                    done_text = f"{done_text}\n{get_text('ai_fallback_used', lang)}"
+                await status_message.edit_text(done_text)
         elif queued:
-            await send_text_reply(message, get_text("ai_done", lang, count=queued))
+            done_text = get_text("ai_done", lang, count=queued)
+            if used_offline:
+                done_text = f"{done_text}\n{get_text('ai_fallback_used', lang)}"
+            await send_text_reply(message, done_text)
     except asyncio.QueueFull:
         if status_message:
             with contextlib.suppress(Exception):
@@ -3059,6 +3537,30 @@ async def run_ai_flow(
             await send_text_reply(message, get_text("queue_full", lang))
     except Exception as exc:
         logger.exception("AI flow failed: %s", exc)
+        if AI_OFFLINE_FALLBACK:
+            try:
+                quizzes = local_quiz_pack(clean_payload, lang, count, mode)
+                target = explicit_target or settings.default_target or message.chat.id
+                queued = await enqueue_quiz_items(
+                    target=target,
+                    quizzes=quizzes,
+                    context=context,
+                    owner_user_id=owner_user_id,
+                    lang=lang,
+                    source_chat_id=message.chat.id,
+                    source_message_id=message.message_id,
+                    delete_source=settings.delete_source and message.chat.type != ChatType.CHANNEL,
+                )
+                fallback_text = get_text("ai_done", lang, count=queued)
+                fallback_text = f"{fallback_text}\n{get_text('ai_fallback_used', lang)}"
+                if status_message:
+                    with contextlib.suppress(Exception):
+                        await status_message.edit_text(fallback_text)
+                else:
+                    await send_text_reply(message, fallback_text)
+                return
+            except Exception as fallback_exc:
+                logger.exception("Offline AI fallback failed: %s", fallback_exc)
         error_text = get_text("ai_error", lang, reason=str(exc)[:180])
         if status_message:
             with contextlib.suppress(Exception):
@@ -3128,11 +3630,10 @@ async def run_ai_tool_flow(
         await send_text_reply(message, get_text("ai_usage_tool", lang))
         return
 
-    if not ai_service_available(settings):
-        if selected_tool in {"joke", "riddle", "icebreaker", "trivia"}:
-            await send_text_reply(message, local_fun_break_message(selected_tool, lang))
-        elif selected_tool == "studypack":
-            await send_text_reply(message, local_study_pack(payload, lang))
+    remote_ai_ready = ai_service_available(settings)
+    if not remote_ai_ready:
+        if AI_OFFLINE_FALLBACK:
+            await send_text_reply(message, local_ai_tool_text(selected_tool, payload, lang))
         else:
             await send_text_reply(message, get_text("ai_disabled_global", lang))
         return
@@ -3143,7 +3644,8 @@ async def run_ai_tool_flow(
 
     status_message = None
     with contextlib.suppress(Exception):
-        status_message = await message.reply_text(get_text("tool_processing", lang))
+        processing_key = "tool_processing" if remote_ai_ready else "tool_processing_offline"
+        status_message = await message.reply_text(get_text(processing_key, lang))
 
     try:
         response_text = await generate_ai_tool_text(selected_tool, payload, lang, settings.ai_model, settings.ai_specialty, settings=settings)
@@ -3154,6 +3656,15 @@ async def run_ai_tool_flow(
             await send_text_reply(message, response_text[:3900])
     except Exception as exc:
         logger.exception("AI tool flow failed: %s", exc)
+        if AI_OFFLINE_FALLBACK:
+            fallback_text = local_ai_tool_text(selected_tool, payload, lang)
+            fallback_text = f"{fallback_text}\n\n{get_text('ai_fallback_used', lang)}"
+            if status_message:
+                with contextlib.suppress(Exception):
+                    await status_message.edit_text(fallback_text[:3900])
+            else:
+                await send_text_reply(message, fallback_text[:3900])
+            return
         error_text = get_text("tool_error", lang, reason=str(exc)[:180])
         if status_message:
             with contextlib.suppress(Exception):
@@ -3323,7 +3834,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
             settings = await get_user_settings(user.id)
             with contextlib.suppress(Exception):
                 await query.edit_message_text(build_settings_text(settings, lang), reply_markup=build_controls_keyboard(lang, settings))
-        elif panel in {"language", "providers", "freemodels", "tools", "study", "delivery", "share", "count", "fun"} and user:
+        elif panel in {"ai", "language", "providers", "freemodels", "tools", "study", "delivery", "share", "count", "fun"} and user:
             with contextlib.suppress(Exception):
                 await edit_panel(query, user.id, lang, panel)
         else:
@@ -3672,6 +4183,7 @@ def main() -> None:
     app.add_handler(CommandHandler("providers", providers_handler))
     app.add_handler(CommandHandler("provider", provider_handler))
     app.add_handler(CommandHandler("freeai", freeai_handler))
+    app.add_handler(CommandHandler("aidiag", aidiag_handler))
     app.add_handler(CommandHandler("freemodels", freemodels_handler))
     app.add_handler(CommandHandler("freemodel", freemodel_handler))
     app.add_handler(CommandHandler("setcount", setcount_handler))

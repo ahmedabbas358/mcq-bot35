@@ -16,6 +16,7 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - Optional group entertainment breaks that appear after a configurable number of quizzes.
 - Optional free local AI through Ollama using the same OpenAI-compatible client.
 - Recommended free local models: `qwen2.5:7b`, `llama3.1:8b`, and `gemma2:9b`.
+- Offline AI fallback for quizzes and study tools when no live model endpoint is configured.
 - Per-user settings for target, AI model, AI count, and source-message deletion.
 - External quiz preview pages for sharing on Telegram, WhatsApp, X, and other apps.
 - Runtime controls for share mode, explanation button, confirmation message, language, AI tool mode, fun breaks, and health checks.
@@ -34,6 +35,7 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - `OPENAI_REASONING_EFFORT=low`
 - `AI_DEFAULT_COUNT=3`
 - `AI_MAX_SOURCE_CHARS=4000`
+- `AI_OFFLINE_FALLBACK=true`
 - `DELETE_SOURCE_MESSAGES=false`
 - `QUIZ_CONFIRMATION_MESSAGE=true`
 - `ENABLE_WEB_PREVIEW=true`
@@ -63,6 +65,7 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - `/providers`
 - `/provider <name>`
 - `/freeai`
+- `/aidiag`
 - `/freemodels`
 - `/freemodel <name>`
 - `/setcount <1-10>`
@@ -103,11 +106,13 @@ OPENAI_MODEL=qwen2.5:7b
 
 The bot will keep using the same OpenAI-compatible client but send requests to your local Ollama server.
 If you want other free local options, open `/freemodels` in the bot and pick `llama3.1:8b` or `gemma2:9b`.
+If no local model server is running, the bot still falls back to a local study engine for quizzes, study packs, and lightweight AI tools.
 For external share preview links, set `PUBLIC_BASE_URL` when you can, or let the app auto-detect the public Railway / Render / Vercel URL if your platform exposes one.
 
 ## AI control panel
 
 Use `/controls` to open the full inline control panel. From there you can switch language, choose a provider preset, choose a free local model, change the AI tool, open study mode, adjust delivery and share modes, and tune group fun breaks without memorizing commands.
+Use `/aidiag` to inspect whether the bot is using a live provider or the offline fallback engine.
 
 ## Run locally
 
