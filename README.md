@@ -11,11 +11,11 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - Optional OpenAI integration for:
   - `/ai <topic>` to generate quizzes from a topic.
   - `/quizify <text>` to turn source text into quizzes.
-- AI provider presets with `/providers`, `/provider <name>`, and `/freeai` for the local Ollama profile.
+- AI provider presets with `/providers`, `/provider <name>`, and `/freeai` for the best available free profile.
 - Smart AI tools for summaries, translation, flashcards, simplification, riddles, jokes, icebreakers, and more.
 - Optional group entertainment breaks that appear after a configurable number of quizzes.
-- Optional free local AI through Ollama using the same OpenAI-compatible client.
-- Recommended free local models: `qwen2.5:7b`, `llama3.1:8b`, and `gemma2:9b`.
+- Optional free local AI through Ollama using the same OpenAI-compatible client, plus Gemini API support for hosted free-tier use when `GEMINI_API_KEY` is available.
+- Recommended free local models: `qwen2.5:14b-instruct`, `gemma3:12b`, `qwen2.5:7b`, and `llama3.1:8b`.
 - Offline AI fallback for quizzes and study tools when no live model endpoint is configured.
 - Per-user settings for target, AI model, AI count, and source-message deletion.
 - External quiz preview pages for sharing on Telegram, WhatsApp, X, and other apps.
@@ -33,9 +33,12 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - `OPENAI_BASE_URL=`
 - `OPENAI_MODEL=gpt-5.4-mini`
 - `OPENAI_REASONING_EFFORT=low`
+- `GEMINI_API_KEY=...`
+- `GEMINI_MODEL=gemini-2.5-flash`
 - `AI_DEFAULT_COUNT=3`
 - `AI_MAX_SOURCE_CHARS=4000`
 - `AI_OFFLINE_FALLBACK=true`
+- `PRESERVE_TARGET_ORDER=true`
 - `DELETE_SOURCE_MESSAGES=false`
 - `QUIZ_CONFIRMATION_MESSAGE=true`
 - `ENABLE_WEB_PREVIEW=true`
@@ -61,10 +64,10 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - `/clearchannel`
 - `/toggledelete`
 - `/toggleai`
-- `/setmodel <model-id>`
+- `/setmodel <model-id>` - override the model and auto-pick the right provider when possible
 - `/providers`
 - `/provider <name>`
-- `/freeai`
+- `/freeai` - choose the best available free AI profile
 - `/aidiag`
 - `/freemodels`
 - `/freemodel <name>`
@@ -95,17 +98,18 @@ The bot supports Arabic and English interfaces through `/language <auto|ar|en>` 
 If you want a free local setup instead of a paid API:
 
 1. Install Ollama.
-2. Pull the recommended free model `qwen2.5:7b`.
+2. Pull the recommended free model `qwen2.5:14b-instruct`.
 3. Set:
 
 ```bash
 OPENAI_BASE_URL=http://localhost:11434/v1
 AI_API_KEY=ollama
-OPENAI_MODEL=qwen2.5:7b
+OPENAI_MODEL=qwen2.5:14b-instruct
 ```
 
 The bot will keep using the same OpenAI-compatible client but send requests to your local Ollama server.
-If you want other free local options, open `/freemodels` in the bot and pick `llama3.1:8b` or `gemma2:9b`.
+If you want other free local options, open `/freemodels` in the bot and pick `gemma3:12b`, `gemma3:4b`, `qwen2.5:7b`, or `llama3.1:8b`.
+If you want the best practical free option on hosting, set `GEMINI_API_KEY` and use the Gemini provider preset from `/providers` or `/freeai`.
 If no local model server is running, the bot still falls back to a local study engine for quizzes, study packs, and lightweight AI tools.
 For external share preview links, set `PUBLIC_BASE_URL` when you can, or let the app auto-detect the public Railway / Render / Vercel URL if your platform exposes one.
 
@@ -113,6 +117,7 @@ For external share preview links, set `PUBLIC_BASE_URL` when you can, or let the
 
 Use `/controls` to open the full inline control panel. From there you can switch language, choose a provider preset, choose a free local model, change the AI tool, open study mode, adjust delivery and share modes, and tune group fun breaks without memorizing commands.
 Use `/aidiag` to inspect whether the bot is using a live provider or the offline fallback engine.
+If a model choice seems ignored, check whether the matching provider is selected too. The bot now tries to infer the right provider for local models and Gemini models automatically.
 
 ## Run locally
 

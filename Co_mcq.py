@@ -64,11 +64,14 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 OPENAI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "low")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "").strip()
 AI_API_KEY = os.getenv("AI_API_KEY", "").strip() or os.getenv("OPENAI_API_KEY", "").strip()
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
 AI_DEFAULT_COUNT = int(os.getenv("AI_DEFAULT_COUNT", "3"))
 AI_MAX_SOURCE_CHARS = int(os.getenv("AI_MAX_SOURCE_CHARS", "4000"))
 QUIZ_CONFIRMATION_MESSAGE = env_bool("QUIZ_CONFIRMATION_MESSAGE", "true")
 ENABLE_WEB_PREVIEW = env_bool("ENABLE_WEB_PREVIEW", "true")
 AI_OFFLINE_FALLBACK = env_bool("AI_OFFLINE_FALLBACK", "true")
+PRESERVE_TARGET_ORDER = env_bool("PRESERVE_TARGET_ORDER", "true")
 CONCURRENT_UPDATES = int(os.getenv("CONCURRENT_UPDATES", "64"))
 GLOBAL_SEND_LIMIT = int(os.getenv("GLOBAL_SEND_LIMIT", "100"))
 LONG_POLL_TIMEOUT = int(os.getenv("LONG_POLL_TIMEOUT", "30"))
@@ -123,10 +126,10 @@ TEXTS = {
             "/clearchannel - clear default target\n"
             "/toggledelete - toggle deleting source messages after publishing\n"
             "/toggleai - enable or disable AI for your account\n"
-            "/setmodel <model> - override AI model\n"
+            "/setmodel <model> - override AI model and auto-detect the provider when possible\n"
             "/provider <name> - choose the AI provider preset\n"
             "/providers - list the available AI provider presets\n"
-            "/freeai - switch to the free local Ollama setup\n"
+            "/freeai - switch to the best available free AI profile\n"
             "/freemodels - list the recommended free local models\n"
             "/freemodel <name> - choose a free local model\n"
             "/aidiag - show AI status and quick fixes\n"
@@ -167,10 +170,10 @@ TEXTS = {
             "/clearchannel - حذف الوجهة الافتراضية\n"
             "/toggledelete - تبديل حذف رسالة المصدر بعد النشر\n"
             "/toggleai - تشغيل أو إيقاف الذكاء الاصطناعي لحسابك\n"
-            "/setmodel <model> - تغيير نموذج الذكاء الاصطناعي\n"
+            "/setmodel <model> - تغيير نموذج الذكاء الاصطناعي مع اكتشاف المزوّد المناسب تلقائياً إذا أمكن\n"
             "/provider <name> - اختيار مزود الذكاء الاصطناعي\n"
             "/providers - عرض مزودات الذكاء الاصطناعي المتاحة\n"
-            "/freeai - التبديل إلى Ollama المحلي المجاني\n"
+            "/freeai - التبديل إلى أفضل ملف ذكاء مجاني متاح\n"
             "/freemodels - عرض النماذج المحلية المجانية المقترحة\n"
             "/freemodel <name> - اختيار نموذج محلي مجاني\n"
             "/aidiag - عرض حالة الذكاء الاصطناعي والإصلاحات السريعة\n"
@@ -244,6 +247,7 @@ TEXTS = {
             "- AI tool: {ai_tool}\n"
             "- Delivery mode: {delivery_mode}\n"
             "- Share mode: {share_mode}\n"
+            "- Preserve question order: {preserve_order}\n"
             "- Web preview URL configured: {web_preview}\n"
             "- Show explanation button: {show_explanation}\n"
             "- Confirmation message: {confirmation}\n"
@@ -266,6 +270,7 @@ TEXTS = {
             "- أداة الذكاء الاصطناعي: {ai_tool}\n"
             "- وضع الإرسال: {delivery_mode}\n"
             "- وضع المشاركة: {share_mode}\n"
+            "- الحفاظ على ترتيب الأسئلة: {preserve_order}\n"
             "- رابط المعاينة الخارجية مضبوط: {web_preview}\n"
             "- إظهار زر الشرح: {show_explanation}\n"
             "- رسالة التأكيد: {confirmation}\n"
@@ -316,8 +321,8 @@ TEXTS = {
     "model_set": {"en": "AI model updated to: {model}", "ar": "تم تحديث نموذج الذكاء الاصطناعي إلى: {model}"},
     "provider_set": {"en": "AI provider updated to: {provider}", "ar": "تم تحديث مزود الذكاء الاصطناعي إلى: {provider}"},
     "provider_free": {
-        "en": "Free local AI profile selected with Ollama and qwen2.5:7b. If Ollama is not running, the offline fallback engine will handle requests.",
-        "ar": "تم اختيار ملف الذكاء المحلي المجاني عبر Ollama و qwen2.5:7b. وإذا لم يكن Ollama يعمل، فسيعالج المحرك الاحتياطي المحلي الطلبات.",
+        "en": "Free AI profile selected: {provider} ({model}). If the chosen backend is unavailable, the offline fallback engine will handle requests.",
+        "ar": "تم اختيار ملف الذكاء المجاني: {provider} ({model}). وإذا كان الخلفي المختار غير متاح، فسيعالج المحرك الاحتياطي المحلي الطلبات.",
     },
     "provider_missing": {
         "en": "This provider needs its API key or endpoint configured in environment variables.",
@@ -425,12 +430,12 @@ TEXTS = {
         "ar": "لم يتمكن البوت من الوصول إلى هذه الوجهة. أضف البوت هناك أولاً أو تحقق من المعرّف/الاسم.",
     },
     "free_ai_help": {
-        "en": "Free local AI is available through Ollama using OPENAI_BASE_URL=http://localhost:11434/v1 and models like qwen2.5:7b, llama3.1:8b, or gemma2:9b. If no local model server is running, the bot falls back to an offline study engine for quizzes and study tools.",
-        "ar": "يمكنك استخدام ذكاء اصطناعي مجاني محلياً عبر Ollama باستخدام OPENAI_BASE_URL=http://localhost:11434/v1 ونماذج مثل qwen2.5:7b أو llama3.1:8b أو gemma2:9b. وإذا لم يكن هناك خادم نموذج محلي، فسيستخدم البوت محركاً محلياً احتياطياً للأسئلة وأدوات الدراسة.",
+        "en": "Free AI on hosting works best with Gemini if you set GEMINI_API_KEY. For local free AI, use Ollama with OPENAI_BASE_URL=http://localhost:11434/v1 and models like qwen2.5:14b-instruct or gemma3:12b. If no live backend is available, the bot falls back to an offline study engine for quizzes and study tools.",
+        "ar": "أفضل خيار مجاني على الاستضافة هو Gemini إذا أضفت GEMINI_API_KEY. وللذكاء المجاني المحلي استخدم Ollama مع OPENAI_BASE_URL=http://localhost:11434/v1 ونماذج مثل qwen2.5:14b-instruct أو gemma3:12b. وإذا لم يكن هناك خلفي حي، فسيستخدم البوت محركاً محلياً احتياطياً للأسئلة وأدوات الدراسة.",
     },
     "free_models_header": {
-        "en": "Recommended free local models:",
-        "ar": "أفضل النماذج المحلية المجانية المقترحة:",
+        "en": "Recommended free local models and hosted free option:",
+        "ar": "أفضل النماذج المحلية المجانية وخيار الاستضافة المجاني:",
     },
     "usage_freemodels": {"en": "Usage: /freemodels", "ar": "الاستخدام: /freemodels"},
     "usage_freemodel": {"en": "Usage: /freemodel <name>", "ar": "الاستخدام: /freemodel <name>"},
@@ -596,7 +601,15 @@ AI_PROVIDER_CATALOG = {
         "ar": "Ollama المحلي",
         "base_url": "http://localhost:11434/v1",
         "api_key_env": "OLLAMA_API_KEY",
-        "default_model": "qwen2.5:7b",
+        "default_model": "qwen2.5:14b-instruct",
+        "mode": "compatible",
+    },
+    "gemini": {
+        "en": "Gemini API",
+        "ar": "Gemini API",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "api_key_env": "GEMINI_API_KEY",
+        "default_model": GEMINI_MODEL,
         "mode": "compatible",
     },
     "openrouter": {
@@ -711,14 +724,6 @@ AI_PROVIDER_CATALOG = {
         "default_model": "",
         "mode": "manual",
     },
-    "gemini": {
-        "en": "Gemini",
-        "ar": "Gemini",
-        "base_url": "",
-        "api_key_env": "GEMINI_API_KEY",
-        "default_model": "",
-        "mode": "manual",
-    },
     "huggingface": {
         "en": "Hugging Face",
         "ar": "Hugging Face",
@@ -749,6 +754,7 @@ AI_PROVIDER_ALIASES = {
     "local": "ollama",
     "freeai": "ollama",
     "ollama-free": "ollama",
+    "gemini-ai": "gemini",
     "default": "auto",
     "open-ai": "openai",
     "openrouterai": "openrouter",
@@ -761,12 +767,33 @@ AI_PROVIDER_ALIASES = {
 }
 
 FREE_MODEL_CATALOG = {
+    "qwen2.5:14b-instruct": {
+        "en": "Qwen2.5 14B Instruct",
+        "ar": "كوين 2.5 - 14B Instruct",
+        "desc_en": "Stronger multilingual free choice for Arabic + English study and quiz work.",
+        "desc_ar": "خيار مجاني أقوى متعدد اللغات للعربية والإنجليزية في الدراسة والاختبارات.",
+        "recommended": True,
+    },
+    "gemma3:12b": {
+        "en": "Gemma 3 12B",
+        "ar": "جيما 3 - 12B",
+        "desc_en": "Google's stronger free local model with wide multilingual coverage.",
+        "desc_ar": "نموذج محلي قوي من Google بتغطية لغات واسعة.",
+        "recommended": True,
+    },
+    "gemma3:4b": {
+        "en": "Gemma 3 4B",
+        "ar": "جيما 3 - 4B",
+        "desc_en": "A lighter Gemma 3 option for smaller machines.",
+        "desc_ar": "خيار أخف من Gemma 3 للأجهزة الأصغر.",
+        "recommended": False,
+    },
     "qwen2.5:7b": {
         "en": "Qwen2.5 7B",
         "ar": "كوين 2.5 - 7B",
-        "desc_en": "Best balanced free choice for Arabic + English study and quiz work.",
-        "desc_ar": "أفضل خيار متوازن مجاني للعربية والإنجليزية في الدراسة والاختبارات.",
-        "recommended": True,
+        "desc_en": "Lighter fallback for smaller machines and faster local replies.",
+        "desc_ar": "خيار أخف للأجهزة الأضعف واستجابات محلية أسرع.",
+        "recommended": False,
     },
     "llama3.1:8b": {
         "en": "Llama 3.1 8B",
@@ -775,24 +802,20 @@ FREE_MODEL_CATALOG = {
         "desc_ar": "نموذج مفتوح قوي للاستخدام العام والمهام المختلطة.",
         "recommended": False,
     },
-    "gemma2:9b": {
-        "en": "Gemma 2 9B",
-        "ar": "جيما 2 - 9B",
-        "desc_en": "Good compact local model for concise study outputs.",
-        "desc_ar": "نموذج محلي مدمج ومفيد للمخرجات الدراسية المختصرة.",
-        "recommended": False,
-    },
 }
 FREE_MODEL_ALIASES = {
-    "qwen": "qwen2.5:7b",
-    "qwen2.5": "qwen2.5:7b",
+    "qwen": "qwen2.5:14b-instruct",
+    "qwen2.5": "qwen2.5:14b-instruct",
+    "qwen2.5:14b": "qwen2.5:14b-instruct",
+    "qwen2.5:14b-instruct": "qwen2.5:14b-instruct",
     "qwen2.5:7b-instruct": "qwen2.5:7b",
     "llama": "llama3.1:8b",
     "llama3.1": "llama3.1:8b",
     "llama3.1:8b-instruct": "llama3.1:8b",
-    "gemma": "gemma2:9b",
-    "gemma2": "gemma2:9b",
-    "gemma2:9b-it": "gemma2:9b",
+    "gemma": "gemma3:12b",
+    "gemma3": "gemma3:12b",
+    "gemma3:4b": "gemma3:4b",
+    "gemma3:12b": "gemma3:12b",
 }
 
 Target = Union[int, str]
@@ -862,6 +885,7 @@ global_send_semaphore = asyncio.Semaphore(GLOBAL_SEND_LIMIT)
 chat_type_cache: Dict[str, str] = {}
 group_interlude_state: Dict[str, Dict[str, int]] = defaultdict(lambda: {"count": 0, "last": 0})
 group_interlude_lock = asyncio.Lock()
+quiz_answer_rotation_state: Dict[str, int] = defaultdict(int)
 
 
 def get_text(key: str, lang: str = "en", **kwargs) -> str:
@@ -1443,11 +1467,14 @@ async def record_stats(user_id: int, target: Target, chat_type: str, title: str)
 
 
 def resolve_ai_runtime(settings: Optional[UserSettings] = None, model_override: Optional[str] = None) -> Tuple[Optional[str], Optional[str], str]:
-    provider = normalize_ai_provider(settings.ai_provider if settings else "auto")
+    provider = normalize_runtime_provider(settings)
     model = (model_override or (settings.ai_model if settings else "") or OPENAI_MODEL).strip() or OPENAI_MODEL
 
     if provider == "ollama":
-        return "ollama", "http://localhost:11434/v1", (model_override or model or "qwen2.5:7b").strip() or "qwen2.5:7b"
+        return "ollama", "http://localhost:11434/v1", (model_override or model or "qwen2.5:14b-instruct").strip() or "qwen2.5:14b-instruct"
+
+    if provider == "gemini":
+        return GEMINI_API_KEY or None, "https://generativelanguage.googleapis.com/v1beta/openai/", (model_override or GEMINI_MODEL).strip() or GEMINI_MODEL
 
     preset = AI_PROVIDER_CATALOG.get(provider, AI_PROVIDER_CATALOG["auto"])
     if preset.get("mode") != "compatible" and provider not in {"auto", "custom"}:
@@ -1478,7 +1505,7 @@ def resolve_ai_runtime(settings: Optional[UserSettings] = None, model_override: 
         api_key = "ollama"
 
     if provider == "ollama" and not model_override and (not settings or settings.ai_model == OPENAI_MODEL):
-        model = "qwen2.5:7b"
+        model = "qwen2.5:14b-instruct"
 
     if provider == "auto" and settings and settings.ai_model:
         model = settings.ai_model
@@ -1501,6 +1528,40 @@ def get_openai_client(settings: Optional[UserSettings] = None) -> Optional["Open
 
 def ai_service_available(settings: Optional[UserSettings] = None) -> bool:
     return get_openai_client(settings) is not None
+
+
+def normalize_runtime_provider(settings: Optional[UserSettings] = None) -> str:
+    provider = normalize_ai_provider(settings.ai_provider if settings else "auto")
+    if provider != "auto":
+        return provider
+    has_openai_like_runtime = bool(OPENAI_BASE_URL or AI_API_KEY or os.getenv("OPENAI_API_KEY", "").strip())
+    if not has_openai_like_runtime and GEMINI_API_KEY:
+        return "gemini"
+    return provider
+
+
+def is_gemini_runtime(settings: Optional[UserSettings] = None) -> bool:
+    return normalize_runtime_provider(settings) == "gemini"
+
+
+def extract_ai_response_text(response, gemini_runtime: bool = False) -> str:
+    if gemini_runtime:
+        choices = getattr(response, "choices", None) or []
+        if choices:
+            message = getattr(choices[0], "message", None)
+            if message is not None:
+                content = getattr(message, "content", "")
+                if isinstance(content, list):
+                    parts = []
+                    for part in content:
+                        if isinstance(part, dict):
+                            parts.append(str(part.get("text", "") or ""))
+                        else:
+                            parts.append(str(part))
+                    return "".join(parts).strip()
+                return str(content or "").strip()
+        return ""
+    return clean_json_text(getattr(response, "output_text", "") or "")
 
 
 def normalize_ai_correct_option(value, options_len: int) -> Optional[int]:
@@ -1565,6 +1626,8 @@ async def generate_quizzes_with_ai(
     if client is None:
         raise RuntimeError("AI is unavailable")
 
+    runtime_provider = normalize_runtime_provider(settings)
+    runtime_model = resolve_runtime_model(settings, model)
     count = max(1, min(10, count))
     payload = payload.strip()[:AI_MAX_SOURCE_CHARS]
     language_name = "Arabic" if lang == "ar" else "English"
@@ -1575,6 +1638,7 @@ async def generate_quizzes_with_ai(
         "Use zero-based integers for correct_option. "
         "Keep questions concise, avoid duplicate options, and keep explanations brief. "
         "Do not invent facts. If the source is insufficient, only ask about explicit content. "
+        f"Return exactly {count} quizzes and do not stop early. "
         f"Act like a specialist in this domain: {specialty_text}. "
         "The response JSON must be an object with a single key named quizzes."
     )
@@ -1583,6 +1647,7 @@ async def generate_quizzes_with_ai(
         user_prompt = (
             f"Generate {count} MCQ quizzes in {language_name} from this topic:\n"
             f"{payload}\n\n"
+            f"Return exactly {count} quizzes. "
             "Return JSON in this shape:\n"
             '{"quizzes":[{"question":"...","options":["...","...","...","..."],"correct_option":0,"explanation":"..."}]}'
         )
@@ -1591,21 +1656,31 @@ async def generate_quizzes_with_ai(
             f"Read the following source text and create {count} MCQ quizzes in {language_name} "
             "that test understanding of the text.\n\n"
             f"Source text:\n{payload}\n\n"
+            f"Return exactly {count} quizzes. "
             "Return JSON in this shape:\n"
             '{"quizzes":[{"question":"...","options":["...","...","...","..."],"correct_option":0,"explanation":"..."}]}'
         )
 
     def _run():
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        if runtime_provider == "gemini":
+            return client.chat.completions.create(
+                model=runtime_model,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=min(8000, 1400 + count * 450),
+            )
+
         kwargs = {
-            "model": model,
+            "model": runtime_model,
             "store": False,
-            "input": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            "input": messages,
             "text": {"format": {"type": "json_object"}},
-            "temperature": 0.2,
-            "max_output_tokens": 2200,
+            "temperature": 0.1,
+            "max_output_tokens": min(8000, 1400 + count * 450),
         }
         if not OPENAI_BASE_URL:
             kwargs["reasoning"] = {"effort": OPENAI_REASONING_EFFORT}
@@ -1615,14 +1690,38 @@ async def generate_quizzes_with_ai(
             fallback_kwargs = {
                 "model": model,
                 "store": False,
-                "input": kwargs["input"],
+                "input": messages,
             }
             return client.responses.create(**fallback_kwargs)
 
     response = await asyncio.to_thread(_run)
-    raw_text = clean_json_text(getattr(response, "output_text", "") or "")
+    raw_text = clean_json_text(extract_ai_response_text(response, gemini_runtime=(runtime_provider == "gemini")))
     payload_json = json.loads(raw_text)
-    return validate_ai_response(payload_json, count)
+    valid_items = validate_ai_response(payload_json, count)
+    if len(valid_items) >= count:
+        return valid_items[:count]
+
+    seen = {
+        (
+            question.strip().lower(),
+            tuple(option.strip().lower() for option in options),
+            correct_index,
+        )
+        for question, options, correct_index, _ in valid_items
+    }
+    for question, options, correct_index, explanation in local_quiz_pack(payload, lang, count, mode):
+        signature = (
+            question.strip().lower(),
+            tuple(option.strip().lower() for option in options),
+            correct_index,
+        )
+        if signature in seen:
+            continue
+        valid_items.append((question, options, correct_index, explanation))
+        seen.add(signature)
+        if len(valid_items) >= count:
+            break
+    return valid_items[:count]
 
 
 def build_ai_tool_prompt(tool: str, payload: str, lang: str, specialty: str) -> Tuple[str, str, float, int]:
@@ -1644,6 +1743,8 @@ async def generate_ai_tool_text(tool: str, payload: str, lang: str, model: str, 
     client = get_openai_client(settings)
     if client is None:
         raise RuntimeError("AI is unavailable")
+    runtime_provider = normalize_runtime_provider(settings)
+    runtime_model = resolve_runtime_model(settings, model)
     raw_tool = (tool or "").strip().lower().replace(" ", "")
     selected = "trivia" if raw_tool == "trivia" else normalize_ai_tool(raw_tool)
     if selected == "quiz":
@@ -1652,13 +1753,21 @@ async def generate_ai_tool_text(tool: str, payload: str, lang: str, model: str, 
     system_prompt, user_prompt, temperature, max_tokens = build_ai_tool_prompt(selected, payload, lang, specialty)
 
     def _run():
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        if runtime_provider == "gemini":
+            return client.chat.completions.create(
+                model=runtime_model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
         kwargs = {
-            "model": model,
+            "model": runtime_model,
             "store": False,
-            "input": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            "input": messages,
             "temperature": temperature,
             "max_output_tokens": max_tokens,
         }
@@ -1670,12 +1779,12 @@ async def generate_ai_tool_text(tool: str, payload: str, lang: str, model: str, 
             fallback_kwargs = {
                 "model": model,
                 "store": False,
-                "input": kwargs["input"],
+                "input": messages,
             }
             return client.responses.create(**fallback_kwargs)
 
     response = await asyncio.to_thread(_run)
-    text = clean_json_text(getattr(response, "output_text", "") or "")
+    text = clean_json_text(extract_ai_response_text(response, gemini_runtime=(runtime_provider == "gemini")))
     if not text:
         raise ValueError("AI returned empty text")
     return text
@@ -2600,11 +2709,60 @@ def normalize_free_model(value: Optional[str]) -> Optional[str]:
     return raw if raw in FREE_MODEL_CATALOG else None
 
 
+def infer_ai_provider_from_model(value: Optional[str]) -> Optional[str]:
+    raw = (value or "").strip().lower().replace(" ", "")
+    if not raw:
+        return None
+    if normalize_free_model(raw):
+        return "ollama"
+    if raw.startswith("models/gemini") or raw.startswith("gemini"):
+        return "gemini"
+    return None
+
+
+def normalize_ai_model_for_provider(model: Optional[str], provider: Optional[str]) -> str:
+    raw = (model or "").strip()
+    normalized_provider = normalize_ai_provider(provider)
+    if normalized_provider == "ollama":
+        return normalize_free_model(raw) or "qwen2.5:14b-instruct"
+    if normalized_provider == "gemini":
+        if raw.lower().startswith("models/gemini") or raw.lower().startswith("gemini"):
+            return raw
+        return GEMINI_MODEL
+    if normalized_provider == "auto":
+        local_model = normalize_free_model(raw)
+        if local_model:
+            return local_model
+    return raw or OPENAI_MODEL
+
+
 def humanize_free_model(model: str, lang: str) -> str:
     meta = FREE_MODEL_CATALOG.get(normalize_free_model(model) or "", None)
     if not meta:
         return model
     return meta["ar"] if lang == "ar" else meta["en"]
+
+
+def select_free_ai_profile() -> Tuple[str, str]:
+    if GEMINI_API_KEY:
+        return "gemini", GEMINI_MODEL
+    return "ollama", "qwen2.5:14b-instruct"
+
+
+def resolve_runtime_model(settings: Optional[UserSettings] = None, model_hint: Optional[str] = None) -> str:
+    provider = normalize_runtime_provider(settings)
+    raw_hint = (model_hint or (settings.ai_model if settings else "") or "").strip()
+    if provider == "gemini":
+        configured_provider = normalize_ai_provider(settings.ai_provider if settings else "auto")
+        if configured_provider == "gemini" and raw_hint.lower().startswith(("gemini", "models/gemini")):
+            return raw_hint
+        return GEMINI_MODEL
+    if provider == "ollama":
+        return normalize_free_model(raw_hint) or "qwen2.5:14b-instruct"
+    if normalize_free_model(raw_hint):
+        default_model = AI_PROVIDER_CATALOG.get(provider, {}).get("default_model", "") or OPENAI_MODEL
+        return default_model
+    return raw_hint or (AI_PROVIDER_CATALOG.get(provider, {}).get("default_model", "") or OPENAI_MODEL)
 
 
 def humanize_fun_style(style: str, lang: str) -> str:
@@ -2642,6 +2800,7 @@ def build_settings_text(settings: UserSettings, lang: str) -> str:
         ai_tool=humanize_ai_tool(settings.ai_tool_mode, lang),
         delivery_mode=humanize_delivery_mode(settings.delivery_mode, lang),
         share_mode=humanize_share_mode(settings.share_mode, lang),
+        preserve_order=humanize_toggle(PRESERVE_TARGET_ORDER, lang),
         web_preview=humanize_toggle(bool(PUBLIC_BASE_URL), lang),
         show_explanation=humanize_toggle(settings.show_explanation, lang),
         confirmation=humanize_toggle(settings.confirmation_message, lang),
@@ -2653,11 +2812,13 @@ def build_settings_text(settings: UserSettings, lang: str) -> str:
 
 def build_ai_status_text(settings: UserSettings, lang: str) -> str:
     remote_ready = ai_service_available(settings)
+    runtime_provider = normalize_runtime_provider(settings)
+    runtime_model = resolve_runtime_model(settings, settings.ai_model)
     if lang == "ar":
         lines = [
             get_text("ai_status_header", lang),
-            f"- المزود الحالي: {humanize_ai_provider(settings.ai_provider, lang)}",
-            f"- النموذج الحالي: {settings.ai_model}",
+            f"- المزود الفعلي: {humanize_ai_provider(runtime_provider, lang)}",
+            f"- النموذج الفعلي: {runtime_model}",
             f"- الذكاء الخارجي مكوَّن: {humanize_toggle(remote_ready, lang)}",
             f"- المحرك المحلي الاحتياطي: {humanize_toggle(AI_OFFLINE_FALLBACK, lang)}",
             f"- تخصص الذكاء: {settings.ai_specialty or 'عام'}",
@@ -2675,8 +2836,8 @@ def build_ai_status_text(settings: UserSettings, lang: str) -> str:
 
     lines = [
         get_text("ai_status_header", lang),
-        f"- Current provider: {humanize_ai_provider(settings.ai_provider, lang)}",
-        f"- Current model: {settings.ai_model}",
+        f"- Active provider: {humanize_ai_provider(runtime_provider, lang)}",
+        f"- Active model: {runtime_model}",
         f"- Remote AI configured: {humanize_toggle(remote_ready, lang)}",
         f"- Offline fallback engine: {humanize_toggle(AI_OFFLINE_FALLBACK, lang)}",
         f"- AI specialty: {settings.ai_specialty or 'general'}",
@@ -2723,6 +2884,8 @@ def build_providers_text(lang: str) -> str:
             note = "متوافق" if mode == "compatible" else "يتطلب إعدادًا منفصلًا"
         extra = f" | {note} | model: {default_model}"
         lines.append(f"- `{key}`: {label}{extra}")
+    lines.append("")
+    lines.append(get_text("free_ai_help", lang))
     return "\n".join(lines)
 
 
@@ -2750,7 +2913,7 @@ def build_free_models_text(lang: str) -> str:
 
 def build_free_models_keyboard(lang: str, settings: UserSettings) -> InlineKeyboardMarkup:
     buttons: List[List[InlineKeyboardButton]] = []
-    current = normalize_free_model(settings.ai_model) or normalize_free_model("qwen2.5:7b")
+    current = normalize_free_model(settings.ai_model) or normalize_free_model("qwen2.5:14b-instruct")
     row: List[InlineKeyboardButton] = []
     for key, meta in FREE_MODEL_CATALOG.items():
         label = meta["ar"] if lang == "ar" else meta["en"]
@@ -2860,10 +3023,36 @@ async def send_text_reply(message: Message, text: str, **kwargs) -> None:
         await message.reply_text(text, **kwargs)
 
 
+def prepare_quiz_poll_payload(item: SendItem, target: Target) -> Tuple[List[str], int]:
+    options = list(item.options or [])
+    if not options:
+        return options, item.correct_index
+    correct_index = item.correct_index if 0 <= item.correct_index < len(options) else 0
+    if len(options) == 1:
+        return options, correct_index
+
+    rotation_key = f"{item.owner_user_id or 0}:{target}"
+    desired_position = quiz_answer_rotation_state[rotation_key] % len(options)
+    quiz_answer_rotation_state[rotation_key] = quiz_answer_rotation_state[rotation_key] + 1
+
+    correct_option = options[correct_index]
+    distractors = [option for idx, option in enumerate(options) if idx != correct_index]
+    seed_bytes = hashlib.sha256(f"{item.quiz_id}:{rotation_key}:{desired_position}".encode()).digest()
+    rnd = random.Random(int.from_bytes(seed_bytes[:8], "big"))
+    rnd.shuffle(distractors)
+
+    shuffled = distractors[:desired_position] + [correct_option] + distractors[desired_position:]
+    if len(shuffled) != len(options):
+        shuffled = options
+        desired_position = correct_index
+    return shuffled, desired_position
+
+
 def ensure_sender(target: Target, context: ContextTypes.DEFAULT_TYPE) -> None:
     active_tasks = [task for task in sender_tasks[target] if not task.done()]
     sender_tasks[target] = active_tasks
-    missing = max(1, MAX_CONCURRENT_SEND) - len(active_tasks)
+    target_sender_limit = 1 if PRESERVE_TARGET_ORDER else max(1, MAX_CONCURRENT_SEND)
+    missing = target_sender_limit - len(active_tasks)
     for worker_idx in range(missing):
         task = context.application.create_task(_sender(target, context, worker_idx + len(active_tasks) + 1))
         sender_tasks[target].append(task)
@@ -2877,20 +3066,21 @@ async def _sender(target: Target, context: ContextTypes.DEFAULT_TYPE, worker_idx
             async with global_send_semaphore:
                 try:
                     target_chat_type = await resolve_target_chat_type(context.bot, target)
+                    poll_options, poll_correct_index = prepare_quiz_poll_payload(item, target)
                     sent_message = await context.bot.send_poll(
                         chat_id=target,
                         question=item.question,
-                        options=item.options,
+                        options=poll_options,
                         type=Poll.QUIZ,
-                        correct_option_id=item.correct_index,
+                        correct_option_id=poll_correct_index,
                         is_anonymous=target_chat_type == ChatType.CHANNEL,
                     )
 
                     await save_quiz(
                         quiz_id=item.quiz_id,
                         question=item.question,
-                        options=item.options,
-                        correct_option=item.correct_index,
+                        options=poll_options,
+                        correct_option=poll_correct_index,
                         user_id=item.owner_user_id,
                         explanation=item.explanation,
                     )
@@ -3235,12 +3425,18 @@ async def setmodel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if not message or not user:
         return
     lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
-    model = " ".join(context.args).strip()
-    if not model:
+    model_input = " ".join(context.args).strip()
+    if not model_input:
         await send_text_reply(message, get_text("usage_setmodel", lang))
         return
-    await update_user_settings(user.id, ai_model=model)
+    current = await get_user_settings(user.id)
+    inferred_provider = infer_ai_provider_from_model(model_input) or current.ai_provider
+    model = normalize_ai_model_for_provider(model_input, inferred_provider)
+    await update_user_settings(user.id, ai_provider=inferred_provider, ai_model=model, ai_enabled=True)
     await send_text_reply(message, get_text("model_set", lang, model=model))
+    if inferred_provider != current.ai_provider:
+        updated = await get_user_settings(user.id)
+        await send_text_reply(message, get_text("provider_set", lang, provider=humanize_ai_provider(updated.ai_provider, lang)))
 
 
 async def providers_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -3269,11 +3465,13 @@ async def provider_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     current = await get_user_settings(user.id)
     suggested_model = AI_PROVIDER_CATALOG.get(provider, {}).get("default_model", "") or current.ai_model
     if provider == "ollama" and (not suggested_model or suggested_model == OPENAI_MODEL):
-        suggested_model = "qwen2.5:7b"
-    updated = await update_user_settings(user.id, ai_provider=provider, ai_model=suggested_model or current.ai_model)
+        suggested_model = "qwen2.5:14b-instruct"
+    suggested_model = normalize_ai_model_for_provider(suggested_model or current.ai_model, provider)
+    updated = await update_user_settings(user.id, ai_provider=provider, ai_model=suggested_model, ai_enabled=True)
     await send_text_reply(message, get_text("provider_set", lang, provider=humanize_ai_provider(updated.ai_provider, lang)))
-    if provider == "ollama":
-        await send_text_reply(message, get_text("provider_free", lang))
+    if provider == "ollama" or (provider == "gemini" and ai_service_available(updated)):
+        display_model = humanize_free_model(updated.ai_model, lang) if provider == "ollama" else updated.ai_model
+        await send_text_reply(message, get_text("provider_free", lang, provider=humanize_ai_provider(updated.ai_provider, lang), model=display_model))
     elif not ai_service_available(updated):
         await send_text_reply(message, get_text("provider_missing", lang))
 
@@ -3284,8 +3482,10 @@ async def freeai_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not message or not user:
         return
     lang = await resolve_user_lang(user.id, user.language_code, extract_message_text(message))
-    updated = await update_user_settings(user.id, ai_provider="ollama", ai_model="qwen2.5:7b", ai_enabled=True)
-    await send_text_reply(message, get_text("provider_free", lang))
+    provider, model = select_free_ai_profile()
+    updated = await update_user_settings(user.id, ai_provider=provider, ai_model=model, ai_enabled=True)
+    display_model = humanize_free_model(updated.ai_model, lang) if provider == "ollama" else updated.ai_model
+    await send_text_reply(message, get_text("provider_free", lang, provider=humanize_ai_provider(updated.ai_provider, lang), model=display_model))
     await send_text_reply(message, build_free_models_text(lang), reply_markup=build_free_models_keyboard(lang, updated))
     await send_text_reply(message, build_settings_text(updated, lang), reply_markup=build_controls_keyboard(lang, updated))
 
@@ -3820,9 +4020,10 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         return
     if data == "freeai":
         if user:
-            updated = await update_user_settings(user.id, ai_provider="ollama", ai_model="qwen2.5:7b", ai_enabled=True)
+            provider, model = select_free_ai_profile()
+            updated = await update_user_settings(user.id, ai_provider=provider, ai_model=model, ai_enabled=True)
             with contextlib.suppress(Exception):
-                await query.edit_message_text(build_free_models_text(lang), reply_markup=build_free_models_keyboard(lang, updated))
+                await query.edit_message_text(build_ai_status_text(updated, lang), reply_markup=build_ai_status_keyboard(lang, updated))
         return
     if data == "fun":
         with contextlib.suppress(Exception):
@@ -3898,7 +4099,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
             current = await get_user_settings(user.id)
             suggested_model = AI_PROVIDER_CATALOG.get(provider, {}).get("default_model", "") or current.ai_model
             if provider == "ollama" and (not suggested_model or suggested_model == OPENAI_MODEL):
-                suggested_model = "qwen2.5:7b"
+                suggested_model = "qwen2.5:14b-instruct"
             await update_user_settings(user.id, ai_provider=provider, ai_model=suggested_model or current.ai_model, ai_enabled=True)
             updated = await get_user_settings(user.id)
             with contextlib.suppress(Exception):
