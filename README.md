@@ -6,6 +6,7 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 
 - Modernized handling for private chats, groups, and channels.
 - Better mention/reply flow in groups.
+- Safe auto-detection for clear MCQ batches in groups, even without mentioning the bot every time.
 - Default publishing target with `/setchannel` and `/publishhere`.
 - Share, repost, and explanation buttons for generated quizzes.
 - Optional OpenAI integration for:
@@ -39,6 +40,7 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - `AI_MAX_SOURCE_CHARS=4000`
 - `AI_OFFLINE_FALLBACK=true`
 - `PRESERVE_TARGET_ORDER=true`
+- `GROUP_AUTO_PARSE_MCQS=true`
 - `AI_BACKEND_FAILURE_COOLDOWN=300`
 - `DELETE_SOURCE_MESSAGES=false`
 - `QUIZ_CONFIRMATION_MESSAGE=true`
@@ -48,7 +50,8 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - `CONCURRENT_UPDATES=64`
 - `GLOBAL_SEND_LIMIT=100`
 - `LONG_POLL_TIMEOUT=30`
-- `MAX_QUEUE_SIZE=200`
+- `MAX_QUEUE_SIZE=2500`
+- `MAX_MCQ_BLOCK_LINES=240`
 - `MAX_CONCURRENT_SEND=8`
 - `SEND_INTERVAL=0.15`
 - `FAST_SEND_INTERVAL=0.03`
@@ -93,6 +96,7 @@ Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
 - `/quizify <text>` or reply to a message with `/quizify`
 
 The bot supports Arabic and English interfaces through `/language <auto|ar|en>` or the `/lang` shortcut.
+In groups, the bot can now auto-process obvious MCQ batches without a mention when `GROUP_AUTO_PARSE_MCQS=true`, while normal group chat remains ignored.
 
 ## Free local AI with Ollama
 

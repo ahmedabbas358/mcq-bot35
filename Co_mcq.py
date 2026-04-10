@@ -9,7 +9,7 @@ import random
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import aiosqlite
 import psutil
@@ -60,10 +60,11 @@ def env_int(name: str, default: str = "0") -> int:
 
 
 DB_PATH = os.getenv("DB_PATH", "stats.db")
-MAX_QUEUE_SIZE = int(os.getenv("MAX_QUEUE_SIZE", "200"))
+MAX_QUEUE_SIZE = int(os.getenv("MAX_QUEUE_SIZE", "2500"))
 SEND_INTERVAL = float(os.getenv("SEND_INTERVAL", "0.15"))
 FAST_SEND_INTERVAL = float(os.getenv("FAST_SEND_INTERVAL", "0.03"))
 MAX_CONCURRENT_SEND = int(os.getenv("MAX_CONCURRENT_SEND", "8"))
+MAX_MCQ_BLOCK_LINES = int(os.getenv("MAX_MCQ_BLOCK_LINES", "240"))
 MAX_QUESTION_LENGTH = int(os.getenv("MAX_QUESTION_LENGTH", "300"))
 MAX_OPTION_LENGTH = int(os.getenv("MAX_OPTION_LENGTH", "100"))
 DEFAULT_DELETE_SOURCE = env_bool("DELETE_SOURCE_MESSAGES", "false")
@@ -79,6 +80,7 @@ QUIZ_CONFIRMATION_MESSAGE = env_bool("QUIZ_CONFIRMATION_MESSAGE", "true")
 ENABLE_WEB_PREVIEW = env_bool("ENABLE_WEB_PREVIEW", "true")
 AI_OFFLINE_FALLBACK = env_bool("AI_OFFLINE_FALLBACK", "true")
 PRESERVE_TARGET_ORDER = env_bool("PRESERVE_TARGET_ORDER", "true")
+GROUP_AUTO_PARSE_MCQS = env_bool("GROUP_AUTO_PARSE_MCQS", "true")
 AI_BACKEND_FAILURE_COOLDOWN = max(0, env_int("AI_BACKEND_FAILURE_COOLDOWN", "300"))
 CONCURRENT_UPDATES = int(os.getenv("CONCURRENT_UPDATES", "64"))
 GLOBAL_SEND_LIMIT = int(os.getenv("GLOBAL_SEND_LIMIT", "100"))
@@ -515,6 +517,24 @@ ARABIC_LETTERS = {
 }
 QUESTION_PREFIXES = ["Q", "Question", "س", "سؤال"]
 ANSWER_KEYWORDS = ["Answer", "Ans", "Correct Answer", "الإجابة", "الجواب", "الإجابة الصحيحة"]
+MCQ_OPTION_PATTERNS = [
+    r"^\s*([a-zأ-ي0-9\u0660-\u0669\u06f0-\u06f9])\s*[).:\-]\s*(.+)",
+    r"^\s*[\(\[]\s*([a-zأ-ي0-9])\s*[\)\]]\s*(.+)",
+    r"^\s*[\u25cb\u25cf\u25a0\u2022\u00d8\*]\s*([a-zأ-ي0-9])\s*[:.]?\s*(.+)",
+    r"^\s*([a-zأ-ي0-9])\s*[\u2013\u2014]\s*(.+)",
+    r"^\s*\b(?:option|اختيار)\s*([a-zأ-ي0-9])\s*[:.]\s*(.+)",
+]
+MCQ_UNLABELED_OPTION_PATTERN = r"^\s*[-*•]\s+(.+)"
+MCQ_BLOCK_START_RE = re.compile(
+    r"^\s*(?:(?:Q(?:uestion)?|MCQ|س(?:ؤال)?)\s*[\d\u0660-\u0669\u06f0-\u06f9]*\s*[\).:\-]?"
+    r"|[\[(]?\s*[\d\u0660-\u0669\u06f0-\u06f9]+\s*[\])\.:\-])\s*",
+    re.I,
+)
+MCQ_EXPLANATION_RE = re.compile(
+    r"^\s*(?:Explanation|Exp|Reason|Note|Reference|Source|شرح|الشرح|تفسير|التفسير|ملاحظة|مرجع)\s*[:\-]",
+    re.I,
+)
+MCQ_REFERENCE_ONLY_RE = re.compile(r"^\s*[\[(]\s*[\d\u0660-\u0669\u06f0-\u06f9]{1,4}\s*[\])]\s*$", re.I)
 
 AI_TOOL_CATALOG = {
     "quiz": {"en": "Quiz generator", "ar": "مولد اختبارات", "desc_en": "Turn text or a topic into MCQs.", "desc_ar": "حوّل النص أو الموضوع إلى أسئلة اختيار من متعدد."},
@@ -859,6 +879,7 @@ class SendItem:
     explanation: str
     owner_user_id: int
     source_chat_id: Optional[int]
+    source_chat_type: str
     source_message_id: Optional[int]
     delete_source: bool
     lang: str
@@ -907,6 +928,7 @@ chat_type_cache: Dict[str, str] = {}
 group_interlude_state: Dict[str, Dict[str, int]] = defaultdict(lambda: {"count": 0, "last": 0})
 group_interlude_lock = asyncio.Lock()
 quiz_answer_rotation_state: Dict[str, int] = defaultdict(int)
+deleted_source_messages: Set[Tuple[int, int]] = set()
 
 
 def get_text(key: str, lang: str = "en", **kwargs) -> str:
@@ -1063,10 +1085,64 @@ def validate_mcq(question: str, options: List[str]) -> bool:
     return True
 
 
+def is_mcq_question_start(line: str) -> bool:
+    return bool(MCQ_BLOCK_START_RE.match((line or "").strip()))
+
+
+def is_mcq_option_line(line: str) -> bool:
+    stripped = (line or "").strip()
+    for pattern in MCQ_OPTION_PATTERNS:
+        if re.match(pattern, stripped, re.I | re.U):
+            return True
+    return False
+
+
+def is_mcq_answer_line(line: str) -> bool:
+    lowered = (line or "").strip().lower()
+    if not lowered:
+        return False
+    for keyword in ANSWER_KEYWORDS + ["Correct", "Solution", "Key", "مفتاح", "صحيح", "صح", "الحل"]:
+        if keyword.lower() in lowered:
+            return True
+    return False
+
+
+def strip_mcq_noise(lines: List[str]) -> List[str]:
+    cleaned: List[str] = []
+    skipping_explanation = False
+    for raw_line in lines:
+        line = (raw_line or "").strip()
+        if not line:
+            continue
+        if MCQ_EXPLANATION_RE.match(line):
+            skipping_explanation = True
+            continue
+        if MCQ_REFERENCE_ONLY_RE.match(line):
+            continue
+        if skipping_explanation:
+            if is_mcq_question_start(line):
+                skipping_explanation = False
+            else:
+                continue
+        cleaned.append(line)
+    return cleaned
+
+
+def looks_like_mcq_batch(text: str) -> bool:
+    raw = (text or "").strip()
+    if not raw:
+        return False
+    lines = [line.strip() for line in raw.splitlines() if line.strip()]
+    option_hits = sum(1 for line in lines if is_mcq_option_line(line))
+    answer_hits = sum(1 for line in lines if is_mcq_answer_line(line))
+    question_hits = sum(1 for line in lines if is_mcq_question_start(line))
+    return option_hits >= 2 and (answer_hits >= 1 or question_hits >= 1)
+
+
 def parse_single_mcq(block: str) -> Optional[Tuple[str, List[str], int]]:
     block = re.sub(r"[\u200b\u200c\ufeff]", "", block)
-    lines = [line.strip() for line in block.splitlines() if line.strip()]
-    if len(lines) > 80:
+    lines = strip_mcq_noise([line.strip() for line in block.splitlines() if line.strip()])
+    if len(lines) > MAX_MCQ_BLOCK_LINES:
         return None
 
     question = None
@@ -1076,27 +1152,29 @@ def parse_single_mcq(block: str) -> Optional[Tuple[str, List[str], int]]:
     unlabeled_options: List[str] = []
 
     question_prefixes = QUESTION_PREFIXES + ["MCQ", "Multiple Choice", "اختبار", "اختر", "أسئلة", "Questions", "السؤال"]
-    option_patterns = [
-        r"^\s*([a-zأ-ي0-9\u0660-\u0669\u06f0-\u06f9])\s*[).:\-]\s*(.+)",
-        r"^\s*[\(\[]\s*([a-zأ-ي0-9])\s*[\)\]]\s*(.+)",
-        r"^\s*[\u25cb\u25cf\u25a0\u2022\u00d8\*]\s*([a-zأ-ي0-9])\s*[:.]?\s*(.+)",
-        r"^\s*([a-zأ-ي0-9])\s*[\u2013\u2014]\s*(.+)",
-        r"^\s*\b(?:option|اختيار)\s*([a-zأ-ي0-9])\s*[:.]\s*(.+)",
-    ]
     answer_keywords = ANSWER_KEYWORDS + ["Correct", "Solution", "Key", "مفتاح", "صحيح", "صح", "الحل"]
-    unlabeled_option_pattern = r"^\s*[-*•]\s+(.+)"
 
     for line in lines:
         if question is None:
-            for prefix in question_prefixes:
-                if line.lower().startswith(prefix.lower()):
-                    question = re.sub(f"^{re.escape(prefix)}\\s*[:.\\-]?\\s*", "", line, flags=re.I).strip()
-                    break
+            question_candidate = re.sub(
+                r"^\s*(?:(?:Q(?:uestion)?|MCQ|س(?:ؤال)?)\s*[\d\u0660-\u0669\u06f0-\u06f9]*\s*[\).:\-]?"
+                r"|[\[(]?\s*[\d\u0660-\u0669\u06f0-\u06f9]+\s*[\])\.:\-])\s*",
+                "",
+                line,
+                flags=re.I,
+            ).strip()
+            if question_candidate and question_candidate != line and not is_mcq_option_line(question_candidate):
+                question = question_candidate
+            else:
+                for prefix in question_prefixes:
+                    if line.lower().startswith(prefix.lower()):
+                        question = re.sub(f"^{re.escape(prefix)}\\s*[:.\\-]?\\s*", "", line, flags=re.I).strip()
+                        break
             if question is not None:
                 continue
 
         matched = False
-        for pattern in option_patterns:
+        for pattern in MCQ_OPTION_PATTERNS:
             match = re.match(pattern, line, re.I | re.U)
             if match:
                 label, text = match.groups()
@@ -1109,7 +1187,7 @@ def parse_single_mcq(block: str) -> Optional[Tuple[str, List[str], int]]:
         if matched:
             continue
 
-        unlabeled_match = re.match(unlabeled_option_pattern, line, re.U)
+        unlabeled_match = re.match(MCQ_UNLABELED_OPTION_PATTERN, line, re.U)
         if unlabeled_match:
             unlabeled_options.append(unlabeled_match.group(1).strip())
             continue
@@ -1236,7 +1314,7 @@ def parse_mcq(text: str) -> List[Tuple[str, List[str], int]]:
                 blocks.append("\n".join(current))
                 current = []
             continue
-        if current and re.match(r"^\s*(?:[Qس]|\d+[.)]|\[)", stripped, re.I):
+        if current and is_mcq_question_start(stripped):
             blocks.append("\n".join(current))
             current = [stripped]
         else:
@@ -1250,7 +1328,7 @@ def parse_mcq(text: str) -> List[Tuple[str, List[str], int]]:
         if item:
             parsed.append(item)
             continue
-        sub_blocks = re.split(r"(?=^\s*(?:[Qس]|\d+[.)]|\[))", block, flags=re.M | re.I)
+        sub_blocks = re.split(r"(?=^\s*(?:(?:Q(?:uestion)?|MCQ|س(?:ؤال)?)\s*[\d\u0660-\u0669\u06f0-\u06f9]*\s*[\).:\-]?|[\[(]?\s*[\d\u0660-\u0669\u06f0-\u06f9]+\s*[\])\.:\-]))", block, flags=re.M | re.I)
         for sub_block in sub_blocks:
             if sub_block.strip():
                 sub_item = parse_single_mcq(sub_block)
@@ -3270,9 +3348,16 @@ async def _sender(target: Target, context: ContextTypes.DEFAULT_TYPE, worker_idx
                     )
 
                     if item.delete_source and item.source_chat_id and item.source_message_id:
-                        if should_delete_source_message(item.delete_source, sent_message.chat.type, item.source_chat_id):
+                        delete_key = (item.source_chat_id, item.source_message_id)
+                        if (
+                            delete_key not in deleted_source_messages
+                            and should_delete_source_message(item.delete_source, item.source_chat_type, item.source_chat_id)
+                        ):
                             with contextlib.suppress(Exception):
                                 await context.bot.delete_message(chat_id=item.source_chat_id, message_id=item.source_message_id)
+                                deleted_source_messages.add(delete_key)
+                                if len(deleted_source_messages) > 5000:
+                                    deleted_source_messages.clear()
 
                     await record_stats(
                         user_id=item.owner_user_id,
@@ -3320,6 +3405,7 @@ async def enqueue_quiz_items(
     owner_user_id: int,
     lang: str,
     source_chat_id: Optional[int] = None,
+    source_chat_type: str = "",
     source_message_id: Optional[int] = None,
     delete_source: bool = False,
 ) -> int:
@@ -3328,7 +3414,7 @@ async def enqueue_quiz_items(
         if not validate_mcq(question, options):
             continue
         quiz_id = hashlib.md5((question + ":::" + ":::".join(options)).encode()).hexdigest()
-        send_queues[target].put_nowait(
+        await send_queues[target].put(
             SendItem(
                 question=question,
                 options=options,
@@ -3337,6 +3423,7 @@ async def enqueue_quiz_items(
                 explanation=explanation,
                 owner_user_id=owner_user_id,
                 source_chat_id=source_chat_id,
+                source_chat_type=source_chat_type,
                 source_message_id=source_message_id,
                 delete_source=delete_source,
                 lang=lang,
@@ -3392,6 +3479,7 @@ async def enqueue_mcq(
             owner_user_id=owner_user_id,
             lang=lang,
             source_chat_id=message.chat.id,
+            source_chat_type=message.chat.type,
             source_message_id=message.message_id,
             delete_source=should_delete_source_message(settings.delete_source, message.chat.type, message.chat.id),
         )
@@ -4421,11 +4509,34 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         context.bot_data["bot_username"] = bot_username
         context.bot_data["bot_id"] = bot_id
 
-    if not message_targets_bot(message, bot_id, bot_username):
+    targeted = message_targets_bot(message, bot_id, bot_username)
+    cleaned_text = remove_bot_mentions(raw_text, bot_username) if targeted else raw_text
+    inline_request = detect_inline_ai_request(cleaned_text)
+    if not targeted:
+        if GROUP_AUTO_PARSE_MCQS and inline_request and user:
+            await run_ai_flow(
+                message=message,
+                context=context,
+                owner_user_id=user.id,
+                lang=lang,
+                mode=inline_request[0],
+                payload=inline_request[1],
+                explicit_target=chat.id,
+            )
+            return
+        if GROUP_AUTO_PARSE_MCQS and looks_like_mcq_batch(raw_text):
+            await enqueue_mcq(
+                message,
+                context,
+                explicit_target=chat.id,
+                owner_user_id=user.id if user else 0,
+                is_private=False,
+                notify_fail=True,
+                text_override=raw_text,
+            )
+            return
         return
 
-    cleaned_text = remove_bot_mentions(raw_text, bot_username)
-    inline_request = detect_inline_ai_request(cleaned_text)
     if inline_request and user:
         await run_ai_flow(
             message=message,
@@ -4450,7 +4561,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    post = update.channel_post
+    post = update.channel_post or update.edited_channel_post
     if not post:
         return
     text = extract_message_text(post)
@@ -4478,7 +4589,7 @@ async def handle_channel_post(update: Update, context: ContextTypes.DEFAULT_TYPE
         )
         return
 
-    await enqueue_mcq(post, context, explicit_target=post.chat.id, owner_user_id=0, is_private=False, notify_fail=False)
+    await enqueue_mcq(post, context, explicit_target=post.chat.id, owner_user_id=0, is_private=False, notify_fail=True)
 
 
 async def schedule_cleanup() -> None:
@@ -4577,7 +4688,8 @@ def main() -> None:
     app.add_handler(CommandHandler("ai", ai_handler))
     app.add_handler(CommandHandler("quizify", quizify_handler))
     app.add_handler(CallbackQueryHandler(callback_query_handler))
-    app.add_handler(MessageHandler(filters.ChatType.CHANNEL & (filters.TEXT | filters.Caption), handle_channel_post))
+    app.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST & filters.ChatType.CHANNEL & (filters.TEXT | filters.Caption), handle_channel_post))
+    app.add_handler(MessageHandler(filters.UpdateType.EDITED_CHANNEL_POST & filters.ChatType.CHANNEL & (filters.TEXT | filters.Caption), handle_channel_post))
     app.add_handler(MessageHandler((filters.TEXT | filters.Caption) & ~filters.COMMAND, handle_text))
 
     logger.info("Bot is starting...")
