@@ -1,2 +1,17 @@
+[project]
+name = "mcq-bot35"
+version = "0.1.0"
+description = "Telegram MCQ Bot"
+requires-python = ">=3.12"
+
+dependencies = [
+    "python-telegram-bot==21.6",
+    "aiosqlite",
+    "psutil",
+    "langdetect",
+    "openai>=1.0.0",
+    "Flask"
+]
+
 [tool.vercel]
 entrypoint = "keep_alive:app"
