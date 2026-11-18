@@ -1,136 +1,194 @@
-# mcq-bot35
+# 🤖 MCQ Bot 35 (v2.0)
 
-Telegram bot for publishing MCQ quizzes in private chats, groups, and channels.
+> **بوت تيليجرام المتكامل لإدارة، نشر، وتوليد أسئلة الاختيار من متعدد (MCQ)، مع أدوات دراسية مدعومة بالذكاء الاصطناعي ووضع دون اتصال.**
+>
+> *Comprehensive Telegram Bot for publishing, generating, and exporting MCQ quizzes with AI & offline study tools.*
 
-## Highlights
+---
 
-- Modernized handling for private chats, groups, and channels.
-- Better mention/reply flow in groups.
-- Safe auto-detection for clear MCQ batches in groups, even without mentioning the bot every time.
-- Default publishing target with `/setchannel` and `/publishhere`.
-- Share, repost, and explanation buttons for generated quizzes.
-- Optional OpenAI integration for:
-  - `/ai <topic>` to generate quizzes from a topic.
-  - `/quizify <text>` to turn source text into quizzes.
-- AI provider presets with `/providers`, `/provider <name>`, and `/freeai` for the best available free profile.
-- Smart AI tools for summaries, translation, flashcards, simplification, riddles, jokes, icebreakers, and more.
-- Optional group entertainment breaks that appear after a configurable number of quizzes.
-- Optional free local AI through Ollama using the same OpenAI-compatible client, plus Gemini API support for hosted free-tier use when `GEMINI_API_KEY` is available.
-- Recommended free local models: `qwen2.5:14b-instruct`, `gemma3:12b`, `qwen2.5:7b`, and `llama3.1:8b`.
-- Offline AI fallback for quizzes and study tools when no live model endpoint is configured.
-- Per-user settings for target, AI model, AI count, and source-message deletion.
-- External quiz preview pages for sharing on Telegram, WhatsApp, X, and other apps.
-- Runtime controls for share mode, explanation button, confirmation message, language, AI tool mode, fun breaks, and health checks.
-- Inline control panels for language, providers, free models, tools, study mode, delivery mode, share mode, batch size, and fun preferences.
+## 🌟 أبرز التحديثات والميزات الجديدة (Version 2.0 Highlights)
 
-## Required environment variables
+1. **🏛 هيكلة برمجية معيارية ونظيفة (Modular Architecture)**:
+   - تم تفكيك الكود الضخم إلى حزم نموذجية منظمة (`bot.config`, `bot.database`, `bot.parsers`, `bot.services`, `bot.handlers`, `bot.keyboards`, `bot.web`, `bot.utils`).
+   - بقاء `Co_mcq.py` و `main.py` كنقاط تشغيل متوافقة 100% مع بيئات الاستضافة (Railway, Render, Fly.io, Heroku, Docker).
 
-- `TELEGRAM_BOT_TOKEN`
+2. **🧠 استخراج التفسير والشروحات المدمجة (Explanations Preservation)**:
+   - يتعرف المحلل تلقائياً على أسطر الشرح والتفسير (`Explanation:`, `الشرح:`, `التفسير:`).
+   - يتم تمرير التفسير مباشرة إلى ميزة التفسير الأصلية في استفتاءات تيليجرام (Telegram Quiz Lightbulb).
+   - حفظ التفسير في قاعدة البيانات وعرضه عند الضغط على زر التفسير أو في صفحة الويب.
 
-## Optional environment variables
+3. **📤 تصدير الأسئلة والاختبارات (`/export`)**:
+   - إمكانية تصدير أسئلة المستخدم أو القناة إلى:
+     - **JSON**: نسخة احتياطية برمجية شاملة.
+     - **CSV**: متوافق تماماً مع Microsoft Excel و Google Sheets (مع UTF-8 BOM).
+     - **GIFT Format**: استيراد مباشر إلى أنظمة Moodle وبطاقات Anki التعليمية.
+     - **TXT**: صيغة نصية مرتبة لسهولة الطباعة والنسخ.
 
-- `DB_PATH=stats.db`
-- `AI_API_KEY=...`
-- `OPENAI_BASE_URL=`
-- `OPENAI_MODEL=gpt-5.4-mini`
-- `OPENAI_REASONING_EFFORT=low`
-- `GEMINI_API_KEY=...`
-- `GEMINI_MODEL=gemini-2.5-flash`
-- `AI_DEFAULT_COUNT=3`
-- `AI_MAX_SOURCE_CHARS=4000`
-- `AI_OFFLINE_FALLBACK=true`
-- `PRESERVE_TARGET_ORDER=true`
-- `GROUP_AUTO_PARSE_MCQS=true`
-- `AI_BACKEND_FAILURE_COOLDOWN=300`
-- `DELETE_SOURCE_MESSAGES=false`
-- `QUIZ_CONFIRMATION_MESSAGE=true`
-- `ENABLE_WEB_PREVIEW=true`
-- `PUBLIC_BASE_URL=https://your-app-domain.com`
-- `TELEGRAM_BOT_USERNAME=your_bot_username`
-- `CONCURRENT_UPDATES=64`
-- `GLOBAL_SEND_LIMIT=100`
-- `LONG_POLL_TIMEOUT=30`
-- `MAX_QUEUE_SIZE=2500`
-- `MAX_MCQ_BLOCK_LINES=240`
-- `MAX_CONCURRENT_SEND=8`
-- `SEND_INTERVAL=0.15`
-- `FAST_SEND_INTERVAL=0.03`
+4. **🎯 وضع الاختبار التفاعلي (`/exam` أو `/test`)**:
+   - جلسة اختبار تفاعلية متتابعة للمستخدم أو المجموعة.
+   - احتساب الدرجات والإجابات الصحيحة والخاطئة لحظياً.
+   - تقرير أداء نهائي مع تقييم وتشجيع بحسب النسبة المئوية.
 
-## Commands
+5. **📄 قراءة الملفات والمستندات المرفوعة (.txt)**:
+   - إمكانية إرسال ملف نصي يحتوي على أسئلة دفعة واحدة، أو نصوص لتحويلها لاختبارات تلقائياً.
 
-- `/start`
-- `/help`
-- `/settings`
-- `/controls`
-- `/stats`
-- `/setchannel <chat_id|@channel|here>`
-- `/publishhere`
-- `/clearchannel`
-- `/toggledelete`
-- `/toggleai`
-- `/setmodel <model-id>` - override the model and auto-pick the right provider when possible
-- `/providers`
-- `/provider <name>`
-- `/freeai` - choose the best available free AI profile
-- `/aidiag`
-- `/freemodels`
-- `/freemodel <name>`
-- `/setcount <1-10>`
-- `/language <auto|ar|en>`
-- `/lang <auto|ar|en>`
-- `/specialty <text|clear>`
-- `/delivery <fast|rich>`
-- `/sharemode <telegram|web|both>`
-- `/toggleexplain`
-- `/toggleconfirm`
-- `/tools`
-- `/tool <mode>`
-- `/ask [tool] <text>`
-- `/funmode <on|off>`
-- `/funrate <1-30>`
-- `/funstyle <mixed|trivia|joke|riddle|icebreaker|poll|study>`
-- `/health`
-- `/examples`
-- `/ai <topic>`
-- `/study <text>`
-- `/quizify <text>` or reply to a message with `/quizify`
+6. **🌐 صفحة ويب تفاعلية متطورة (Interactive Web Preview)**:
+   - تصميم حديث ومستجيب (Responsive) بنمط داكن (Dark Theme).
+   - تجربة حل الأسئلة مباشرة داخل المتصفح مع تأثيرات بصرية فورية للإجابة الصحيحة والخاطئة.
+   - دعم تلقائي لاتجاه النصوص العربية (RTL) والإنجليزية (LTR).
+   - أزرار مشاركة مباشرة إلى Telegram و WhatsApp و X ورابط سريع.
 
-The bot supports Arabic and English interfaces through `/language <auto|ar|en>` or the `/lang` shortcut.
-In groups, the bot can now auto-process obvious MCQ batches without a mention when `GROUP_AUTO_PARSE_MCQS=true`, while normal group chat remains ignored.
+7. **🛡 استقرار فائق ومقاومة القيود (Resilience & Rate-Limit Shield)**:
+   - معالجة تلقائية ذكية لـ `telegram.error.RetryAfter` وإعادة جدولة الأسئلة دون فقدها.
+   - استخدام تقنية SQLite WAL Mode لمنع أي تعليق أو قفل لقاعدة البيانات عند الاستخدام المكثف.
+   - محرك محلي احتياطي (Offline AI Fallback) يضمن عمل البوت حتى عند انقطاع الإنترنت عن مزود الذكاء أو نفاذ الرصيد!
 
-## Free local AI with Ollama
+---
 
-If you want a free local setup instead of a paid API:
+## 📂 هيكلة المشروع (Project Structure)
 
-1. Install Ollama.
-2. Pull the recommended free model `qwen2.5:14b-instruct`.
-3. Set:
-
-```bash
-OPENAI_BASE_URL=http://localhost:11434/v1
-AI_API_KEY=ollama
-OPENAI_MODEL=qwen2.5:14b-instruct
+```text
+mcq-bot35/
+├── bot/                           # الحزمة البرمجية الأساسية
+│   ├── config.py                  # الإعدادات وقراءة متغيرات البيئة
+│   ├── constants.py               # الثوابت، القواميس، الأنماط التعبيرية
+│   ├── database.py                # قاعدة البيانات SQLite والعمليات غير المتزامنة
+│   ├── app.py                     # بناء تطبيق تيليجرام ودورة حياة البوت
+│   ├── i18n/                      # الترجمة والنصوص العربية والإنجليزية
+│   │   └── texts.py
+│   ├── parsers/                   # معالجة وتفكيك الأسئلة والملفات
+│   │   ├── mcq_parser.py          # محلل الأسئلة المتقدم
+│   │   └── document_parser.py     # قراءة الملفات المرفوعة
+│   ├── services/                  # خدمات الذكاء الاصطناعي والتصدير
+│   │   ├── ai_service.py          # مزودات الذكاء (OpenAI, Gemini, Ollama...)
+│   │   ├── offline_ai.py          # المحرك الذكي للعمل بدون إنترنت
+│   │   ├── exam_service.py        # جلسات الاختبار التفاعلية
+│   │   └── exporter.py            # تصدير الأسئلة إلى CSV, JSON, GIFT
+│   ├── keyboards/                 # لوحات الأزرار الشفافة
+│   │   └── inline.py
+│   ├── handlers/                  # معالجات الأوامر والرسائل
+│   │   ├── commands.py            # معالجات الأوامر (/start, /help, /export...)
+│   │   ├── callbacks.py           # معالجات الضغط على الأزرار
+│   │   └── messages.py            # معالجات النصوص والمجموعات والملفات
+│   ├── utils/                     # أدوات مساعدة ونظام الطوابير
+│   │   ├── helpers.py             # وظائف نصوص ولغات مساعدة
+│   │   └── queue_manager.py       # طابور الإرسال المتقدم وموزع الطلبات
+│   └── web/                       # خادم المعاينة وصفحات الويب
+│       └── app.py                 # تطبيق Flask مع واجهة تفاعلية حديثة
+├── tests/                         # مجموعة الاختبارات الشاملة (Unit Tests)
+│   ├── test_mcq_parser.py
+│   ├── test_offline_ai.py
+│   ├── test_exporter.py
+│   ├── test_exam_service.py
+│   ├── test_document_parser.py
+│   └── test_i18n.py
+├── main.py                        # المدخل الرئيسي النظيف
+├── Co_mcq.py                      # المدخل المتوافق مع الاستضافات السابقة
+├── keep_alive.py                  # موجه خادم الويب المتوافق
+├── requirements.txt               # متطلبات التشغيل
+└── .env.example                   # نموذج متغيرات البيئة
 ```
 
-The bot will keep using the same OpenAI-compatible client but send requests to your local Ollama server.
-If you want other free local options, open `/freemodels` in the bot and pick `gemma3:12b`, `gemma3:4b`, `qwen2.5:7b`, or `llama3.1:8b`.
-If you want the best practical free option on hosting, set `GEMINI_API_KEY` and use the Gemini provider preset from `/providers` or `/freeai`.
-If no local model server is running, the bot still falls back to a local study engine for quizzes, study packs, and lightweight AI tools.
-For external share preview links, set `PUBLIC_BASE_URL` when you can, or let the app auto-detect the public Railway / Render / Vercel URL if your platform exposes one.
+---
 
-## AI control panel
+## 🚀 البدء السريع والتشغيل (Quick Start)
 
-Use `/controls` to open the full inline control panel. From there you can switch language, choose a provider preset, choose a free local model, change the AI tool, open study mode, adjust delivery and share modes, and tune group fun breaks without memorizing commands.
-Use `/aidiag` to inspect whether the bot is using a live provider or the offline fallback engine.
-If a model choice seems ignored, check whether the matching provider is selected too. The bot now tries to infer the right provider for local models and Gemini models automatically.
-
-## Run locally
-
+### 1. تثبيت المتطلبات (Requirements Installation)
 ```bash
 pip install -r requirements.txt
+```
+
+### 2. إعداد ملف البيئة (.env)
+انسخ ملف `.env.example` إلى `.env` وضع توكن البوت الخاص بك:
+```bash
+cp .env.example .env
+```
+محتوى أساسي:
+```env
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+```
+
+### 3. تشغيل البوت (Run the Bot)
+يمكنك التشغيل بأي من الأوامر التالية:
+```bash
+python main.py
+# أو
 python Co_mcq.py
 ```
 
-## Important security note
+### 4. تشغيل الاختبارات البرمجية (Run Unit Tests)
+```bash
+python -m unittest discover -s tests -p "test_*.py"
+```
 
-If your Telegram bot token was ever committed into this project, rotate it in BotFather immediately and keep it only in environment variables.
+---
+
+## 📋 دليل الأوامر (Command Reference)
+
+### 🧭 التنقل والإعدادات العامة
+- `/start` - بدء المحادثة مع البوت أو عرض القائمة الرئيسية.
+- `/menu` - فتح القائمة التفاعلية الشاملة.
+- `/help` - عرض دليل المساعدة وتفاصيل الاستخدام.
+- `/settings` أو `/controls` - لوحة التحكم التفاعلية في كافة الخيارات.
+- `/stats` - إحصائيات الأسئلة المرسلة والقنوات المرتبطة.
+- `/health` - فحص جاهزية الخادم والذكاء الاصطناعي وحجم الطابور.
+
+### 📢 إدارة قنوات ومجموعات النشر
+- `/setchannel <@channel|chat_id|here>` - تعيين وجهة النشر الافتراضية.
+- `/publishhere` - تعيين المحادثة الحالية كهدف نشر تلقائي.
+- `/clearchannel` - إلغاء وجهة النشر المخصصة.
+- `/toggledelete` - تفعيل/تعطيل الحذف التلقائي للرسائل الأصلية.
+
+### 🤖 الذكاء الاصطناعي والموديلات
+- `/ai <الموضوع>` - توليد أسئلة اختيار من متعدد حول موضوع معين.
+- `/quizify <النص>` - تحويل نص أو مقال إلى أسئلة اختيار من متعدد (يمكن الرد على رسالة).
+- `/providers` - استعراض كافة مزودي الذكاء المدعومين (OpenAI, Gemini, Ollama, Groq, DeepSeek...).
+- `/provider <الاسم>` - اختيار مزود ذكاء محدد.
+- `/freeai` - التبديل التلقائي إلى أفضل خيار ذكاء اصطناعي مجاني متاح.
+- `/freemodels` - استعراض النماذج المحلية المجانية (Qwen 2.5, Gemma 3, Llama 3.1).
+- `/setcount <1-10>` - تحديد عدد الأسئلة الافتراضي لكل طلب.
+- `/toggleai` - تفعيل أو تعطيل الذكاء الاصطناعي.
+
+### 📚 أدوات المذاكرة والدراسة
+- `/study <النص>` - إنشاء حزمة مذاكرة متكاملة (ملخص، نقاط مهمة، بطاقات، اختبار).
+- `/tools` - استعراض أدوات الذكاء المتخصصة.
+- `/tool <النوع>` - تحديد الأداة النشطة (summary, flashcards, truefalse, simplify...).
+- `/ask [أداة] <النص>` - توجيه سؤال أو طلب محدد لأداة دراسية.
+
+### 📤 التصدير، الاختبارات، ولوحة الشرف (جديد!)
+- `/export` أو `/تصدير [json|csv|gift|txt]` - تصدير الأسئلة إلى ملفات متوافقة مع Excel أو Moodle أو Anki.
+- `/exam` أو `/test` أو `/اختبار` - بدء جلسة اختبار ذاتي تفاعلي مع رصد النتيجة والتغذية الراجعة.
+- `/leaderboard` أو `/المتصدرين` - عرض لوحة الشرف لأعلى الدرجات المسجلة في الاختبارات.
+- `/format` أو `/نموذج` - الحصول على نموذج جاهز للنسخ والتعديل لكتابة الأسئلة.
+- `/difficulty` أو `/صعوبة [easy|medium|hard]` - تحديد مستوى صعوبة الأسئلة المولدة بالذكاء الاصطناعي.
+
+### 🌐 الأوامر باللغة العربية
+يدعم البوت الأوامر باللغة العربية مباشرة (مثل: `/ابدأ`, `/مساعدة`, `/قائمة`, `/اعدادات`, `/احصائيات`, `/ذكاء`, `/مذاكرة`, `/اختبار`, `/تصدير`, `/المتصدرين`, `/نموذج`, `/صعوبة`).
+
+### 🎉 الفواصل الترفيهية للمجموعات
+- `/funmode <on|off>` - تفعيل/تعطيل الفواصل الخفيفة في المجموعات.
+- `/funrate <1-30>` - تحديد معدل ظهور الفاصل (مثلاً كل 6 أسئلة).
+- `/funstyle <mixed|trivia|joke|riddle|icebreaker|poll|study>` - تحديد نوع الفواصل.
+
+---
+
+## 🛠 المتغيرات البيئية (Environment Variables)
+
+| المتغير | الافتراضي | الوصف |
+| :--- | :--- | :--- |
+| `TELEGRAM_BOT_TOKEN` | *إجباري* | توكن البوت من BotFather |
+| `DB_PATH` | `stats.db` | مسار ملف قاعدة بيانات SQLite |
+| `OPENAI_MODEL` | `gpt-4o-mini` | الموديل الافتراضي لـ OpenAI |
+| `GEMINI_API_KEY` | فارغ | مفتاح Google Gemini API المجاني |
+| `GEMINI_MODEL` | `gemini-2.0-flash` | موديل Gemini المستخدم |
+| `AI_OFFLINE_FALLBACK` | `true` | التبديل للمحرك المحلي الذكي عند عدم توفر مفاتيح |
+| `GROUP_AUTO_PARSE_MCQS` | `true` | تمييز ونشر الأسئلة في المجموعات تلقائياً |
+| `ENABLE_WEB_PREVIEW` | `true` | تشغيل خادم معاينة الأسئلة التفاعلي عبر الويب |
+| `PORT` | `8080` | منفذ تشغيل خادم الويب ومعاينة الأسئلة |
+| `PUBLIC_BASE_URL` | فارغ | الرابط العام لصفحة المعاينة (أو اكتشافه تلقائياً) |
+| `CONCURRENT_UPDATES` | `64` | معالجة التحديثات المتزامنة |
+
+---
+
+## 📝 ترخيص المشروع (License)
+هذا المشروع متاح تحت رخصة MIT مفتوحة المصدر.
