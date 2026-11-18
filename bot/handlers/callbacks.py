@@ -37,6 +37,7 @@ from bot.handlers.commands import (
     build_settings_text,
     build_study_text,
     build_tools_text,
+    create_handler,
     exam_handler,
     format_handler,
     leaderboard_handler,
@@ -58,12 +59,18 @@ from bot.keyboards.inline import (
     build_share_keyboard,
     build_study_keyboard,
     build_tools_keyboard,
+    build_wizard_skip_keyboard,
 )
 from bot.services.exam_service import (
     finish_exam,
     get_exam,
 )
 from bot.services.exporter import create_export_file
+from bot.services.wizard_service import (
+    cancel_wizard,
+    finish_wizard_and_publish,
+    get_wizard,
+)
 from bot.utils.helpers import (
     format_target_label,
     normalize_free_model,
@@ -98,8 +105,25 @@ async def edit_panel(query, user_id: int, lang: str, panel: str) -> None:
     if panel not in panel_map:
         return
     text, keyboard = panel_map[panel]
+    breadcrumbs = {
+        "settings": "🏠 الرئيسية » ⚙️ الإعدادات والتحكم" if lang == "ar" else "🏠 Home » ⚙️ Settings Dashboard",
+        "language": "🏠 الرئيسية » ⚙️ الإعدادات » 🌐 لغة البوت" if lang == "ar" else "🏠 Home » ⚙️ Settings » 🌐 Language",
+        "delivery": "🏠 الرئيسية » ⚙️ الإعدادات » ⚡️ نمط الإرسال" if lang == "ar" else "🏠 Home » ⚙️ Settings » ⚡️ Delivery Mode",
+        "share": "🏠 الرئيسية » ⚙️ الإعدادات » 🔗 نمط المشاركة" if lang == "ar" else "🏠 Home » ⚙️ Settings » 🔗 Share Mode",
+        "count": "🏠 الرئيسية » ⚙️ الإعدادات » 🔢 عدد الأسئلة" if lang == "ar" else "🏠 Home » ⚙️ Settings » 🔢 AI Question Count",
+        "providers": "🏠 الرئيسية » 🤖 الذكاء » 🏢 مزود الخدمة والموديل" if lang == "ar" else "🏠 Home » 🤖 AI » 🏢 Provider & Model",
+        "freemodels": "🏠 الرئيسية » 🤖 الذكاء » 🦙 الموديلات المجانية" if lang == "ar" else "🏠 Home » 🤖 AI » 🦙 Free Models",
+        "tools": "🏠 الرئيسية » 🤖 الذكاء » 🛠 الأدوات المتخصصة" if lang == "ar" else "🏠 Home » 🤖 AI » 🛠 Specialized Tools",
+        "study": "🏠 الرئيسية » 📚 أدوات المذاكرة والدراسة" if lang == "ar" else "🏠 Home » 📚 Study Pack Tools",
+        "fun": "🏠 الرئيسية » 🎉 الفواصل الترفيهية للمجموعات" if lang == "ar" else "🏠 Home » 🎉 Fun Breaks for Groups",
+        "ai": "🏠 الرئيسية » 🤖 لوحة تحكم الذكاء الاصطناعي" if lang == "ar" else "🏠 Home » 🤖 AI Control Center",
+        "export": "🏠 الرئيسية » 📤 تصدير بنك الأسئلة" if lang == "ar" else "🏠 Home » 📤 Export Quizzes",
+        "difficulty": "🏠 الرئيسية » ⚙️ الإعدادات » 🎯 مستوى الصعوبة" if lang == "ar" else "🏠 Home » ⚙️ Settings » 🎯 Difficulty Level",
+    }
+    crumb = breadcrumbs.get(panel, "")
+    display_text = f"📍 *{crumb}*\n───────────────────────\n\n{text}" if crumb else text
     with contextlib.suppress(Exception):
-        await query.edit_message_text(text, reply_markup=keyboard, parse_mode="Markdown")
+        await query.edit_message_text(display_text, reply_markup=keyboard, parse_mode="Markdown")
 
 
 async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -126,6 +150,50 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
     if data == "examples":
         with contextlib.suppress(Exception):
             await query.edit_message_text(f"{get_text('examples', lang)}\n\n{get_text('free_ai_help', lang)}", reply_markup=build_main_keyboard(lang))
+        return
+    if data == "cmd:create":
+        await create_handler(update, context)
+        return
+    if data == "wiz:cancel" and user:
+        cancel_wizard(user.id)
+        text = "❌ تم إلغاء إنشاء السؤال بنجاح." if lang == "ar" else "❌ Question creation canceled."
+        with contextlib.suppress(Exception):
+            await query.edit_message_text(text, reply_markup=build_main_keyboard(lang))
+        return
+    if data.startswith("wiz_ans:") and user:
+        wizard = get_wizard(user.id)
+        if not wizard:
+            with contextlib.suppress(Exception):
+                await query.answer("انتهت جلسة إنشاء السؤال أو تم إلغاؤها." if lang == "ar" else "Wizard expired or canceled.", show_alert=True)
+            return
+        idx = int(data.split(":")[1])
+        wizard.correct_option = idx
+        wizard.step = "explanation"
+        letter = chr(65 + idx)
+        chosen_text = wizard.options[idx] if idx < len(wizard.options) else ""
+        if lang == "ar":
+            prompt = (
+                "💡 *إضافة تفسير أو شرح تعليمي (اختياري)*\n"
+                "───────────────────────\n"
+                f"✅ تم تحديد الإجابة الصحيحة: *{letter}) {chosen_text}*\n\n"
+                "أرسل الآن نص *الشرح أو التفسير*، أو اضغط زر **تخطي** لنشر السؤال فوراً."
+            )
+        else:
+            prompt = (
+                "💡 *Add Educational Explanation (Optional)*\n"
+                "───────────────────────\n"
+                f"✅ Correct choice selected: *{letter}) {chosen_text}*\n\n"
+                "Send the *explanation text* now, or click **Skip** to publish immediately."
+            )
+        with contextlib.suppress(Exception):
+            await query.edit_message_text(prompt, reply_markup=build_wizard_skip_keyboard(lang), parse_mode="Markdown")
+        return
+    if data == "wiz:skip_explanation" and user and query.message:
+        wizard = get_wizard(user.id)
+        if not wizard:
+            return
+        wizard.explanation = ""
+        await finish_wizard_and_publish(wizard, query.message, context)
         return
     if data == "cmd:exam":
         await exam_handler(update, context)

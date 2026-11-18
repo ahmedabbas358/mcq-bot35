@@ -64,7 +64,9 @@ from bot.keyboards.inline import (
     build_share_keyboard,
     build_study_keyboard,
     build_tools_keyboard,
+    build_wizard_cancel_keyboard,
 )
+from bot.services.wizard_service import start_wizard
 from bot.services.ai_service import (
     ai_backend_temporarily_disabled,
     ai_service_available,
@@ -1114,3 +1116,29 @@ async def difficulty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update_user_settings(user.id, difficulty=chosen)
     confirm = f"✅ تم ضبط مستوى الصعوبة إلى: *{chosen}*" if lang == "ar" else f"✅ Difficulty level set to: *{chosen}*"
     await send_text_reply(message, confirm, parse_mode="Markdown")
+
+
+async def create_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Start interactive step-by-step Question Creation Wizard."""
+    message = update.effective_message
+    user = update.effective_user
+    chat = update.effective_chat
+    if not message or not user or not chat:
+        return
+    lang = await resolve_user_lang(user.id, getattr(user, "language_code", None), "")
+    start_wizard(user.id, chat.id, lang)
+    if lang == "ar":
+        prompt = (
+            "✍️ *مساعد إنشاء الأسئلة التفاعلي (الخطوة 1 من 3)*\n"
+            "───────────────────────\n"
+            "أهلاً بك! يرجى إرسال *نص السؤال* الآن:\n\n"
+            "💡 *مثال:* ما هي عاصمة سلطنة عُمان؟"
+        )
+    else:
+        prompt = (
+            "✍️ *Interactive Question Wizard (Step 1 of 3)*\n"
+            "───────────────────────\n"
+            "Welcome! Please send the *question text* now:\n\n"
+            "💡 *Example:* What is the capital of Oman?"
+        )
+    await send_text_reply(message, prompt, reply_markup=build_wizard_cancel_keyboard(lang), parse_mode="Markdown")

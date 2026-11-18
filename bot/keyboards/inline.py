@@ -59,45 +59,90 @@ def build_main_keyboard(lang: str = "ar") -> InlineKeyboardMarkup:
     if lang == "ar":
         return InlineKeyboardMarkup([
             [
+                InlineKeyboardButton("✍️ إنشاء سؤال جديد", callback_data="cmd:create"),
                 InlineKeyboardButton("🎯 بدء اختبار تفاعلي", callback_data="cmd:exam"),
-                InlineKeyboardButton("🏆 لوحة المتصدرين", callback_data="cmd:leaderboard"),
             ],
             [
                 InlineKeyboardButton("🤖 توليد بالذكاء الاصطناعي", callback_data="panel:ai"),
                 InlineKeyboardButton("📚 أدوات المذاكرة", callback_data="study"),
             ],
             [
-                InlineKeyboardButton("📋 نموذج التنسيق الجاهز", callback_data="cmd:format"),
-                InlineKeyboardButton("📤 تصدير الأسئلة", callback_data="panel:export"),
+                InlineKeyboardButton("🏆 لوحة المتصدرين", callback_data="cmd:leaderboard"),
+                InlineKeyboardButton("📤 تصدير بنك الأسئلة", callback_data="panel:export"),
             ],
             [
+                InlineKeyboardButton("📋 نموذج التنسيق", callback_data="cmd:format"),
                 InlineKeyboardButton("⚙️ الإعدادات والتحكم", callback_data="settings"),
-                InlineKeyboardButton("📊 الإحصائيات", callback_data="stats"),
             ],
             [
+                InlineKeyboardButton("📊 الإحصائيات", callback_data="stats"),
                 InlineKeyboardButton("❓ دليل المساعدة الشامل", callback_data="help"),
             ],
         ])
     return InlineKeyboardMarkup([
         [
+            InlineKeyboardButton("✍️ Create Question", callback_data="cmd:create"),
             InlineKeyboardButton("🎯 Start Exam", callback_data="cmd:exam"),
-            InlineKeyboardButton("🏆 Leaderboard", callback_data="cmd:leaderboard"),
         ],
         [
             InlineKeyboardButton("🤖 AI Generator", callback_data="panel:ai"),
             InlineKeyboardButton("📚 Study Pack", callback_data="study"),
         ],
         [
-            InlineKeyboardButton("📋 Copyable Template", callback_data="cmd:format"),
+            InlineKeyboardButton("🏆 Leaderboard", callback_data="cmd:leaderboard"),
             InlineKeyboardButton("📤 Export Quizzes", callback_data="panel:export"),
         ],
         [
+            InlineKeyboardButton("📋 Copyable Template", callback_data="cmd:format"),
             InlineKeyboardButton("⚙️ Settings", callback_data="settings"),
-            InlineKeyboardButton("📊 Stats", callback_data="stats"),
         ],
         [
+            InlineKeyboardButton("📊 Stats", callback_data="stats"),
             InlineKeyboardButton("❓ Help Guide", callback_data="help"),
         ],
+    ])
+
+
+def build_wizard_cancel_keyboard(lang: str = "ar") -> InlineKeyboardMarkup:
+    label = "❌ إلغاء الإنشاء" if lang == "ar" else "❌ Cancel"
+    return InlineKeyboardMarkup([[InlineKeyboardButton(label, callback_data="wiz:cancel")]])
+
+
+def build_wizard_choices_keyboard(options: List[str], lang: str = "ar") -> InlineKeyboardMarkup:
+    rows = []
+    row = []
+    for idx, opt in enumerate(options):
+        letter = chr(65 + idx)
+        short_opt = opt[:22] + "…" if len(opt) > 22 else opt
+        btn_label = f"{letter}) {short_opt}"
+        row.append(InlineKeyboardButton(btn_label, callback_data=f"wiz_ans:{idx}"))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    cancel_label = "❌ إلغاء" if lang == "ar" else "❌ Cancel"
+    rows.append([InlineKeyboardButton(cancel_label, callback_data="wiz:cancel")])
+    return InlineKeyboardMarkup(rows)
+
+
+def build_wizard_skip_keyboard(lang: str = "ar") -> InlineKeyboardMarkup:
+    skip_label = "⏭ تخطي الشرح ونشر السؤال" if lang == "ar" else "⏭ Skip & Publish"
+    cancel_label = "❌ إلغاء" if lang == "ar" else "❌ Cancel"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(skip_label, callback_data="wiz:skip_explanation")],
+        [InlineKeyboardButton(cancel_label, callback_data="wiz:cancel")],
+    ])
+
+
+def build_wizard_completed_keyboard(lang: str = "ar") -> InlineKeyboardMarkup:
+    another_label = "➕ إنشاء سؤال آخر" if lang == "ar" else "➕ Create Another"
+    home_label = "🏠 القائمة الرئيسية" if lang == "ar" else "🏠 Main Menu"
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(another_label, callback_data="cmd:create"),
+            InlineKeyboardButton(home_label, callback_data="home"),
+        ]
     ])
 
 

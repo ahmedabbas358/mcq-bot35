@@ -4,6 +4,7 @@ Message handlers for incoming text, group chats, channel posts, and uploaded fil
 
 import contextlib
 import logging
+import re
 from typing import Optional
 
 try:
@@ -24,20 +25,33 @@ from bot.config import (
 )
 from bot.database import (
     DB,
+    get_user_settings,
     resolve_user_lang,
 )
-from bot.handlers.commands import run_ai_flow
+from bot.handlers.commands import run_ai_flow, send_text_reply
 from bot.i18n.texts import get_text
+from bot.keyboards.inline import (
+    build_wizard_cancel_keyboard,
+    build_wizard_choices_keyboard,
+    build_wizard_completed_keyboard,
+)
 from bot.parsers.document_parser import read_telegram_file
 from bot.parsers.mcq_parser import looks_like_mcq_batch
+from bot.services.wizard_service import (
+    QuestionWizard,
+    cancel_wizard,
+    finish_wizard_and_publish,
+    get_wizard,
+)
 from bot.utils.helpers import (
     detect_inline_ai_request,
     extract_message_text,
+    format_target_label,
     infer_lang,
     remove_bot_mentions,
     resolve_chat_title,
 )
-from bot.utils.queue_manager import enqueue_mcq
+from bot.utils.queue_manager import enqueue_mcq, enqueue_quiz_items
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +64,81 @@ def message_targets_bot(message: Message, bot_id: int, bot_username: Optional[st
     if bot_username and f"@{bot_username.lower()}" in text.lower():
         return True
     return False
+
+
+async def handle_wizard_step(
+    wizard: QuestionWizard,
+    message: Message,
+    raw_text: str,
+    lang: str,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    """Handle text input during active question creation wizard."""
+    if wizard.step == "question":
+        wizard.question = raw_text.strip()
+        wizard.step = "options"
+        prompt = (
+            "📝 *الخيارات المقترحة (الخطوة 2 من 3)*\n"
+            "───────────────────────\n"
+            f"السؤال: *{wizard.question}*\n\n"
+            "أرسل الآن الخيارات المقترحة (كل خيار في سطر مستقل):\n\n"
+            "💡 *مثال:*\n"
+            "الخيار الأول\n"
+            "الخيار الثاني\n"
+            "الخيار الثالث\n"
+            "الخيار الرابع"
+            if lang == "ar"
+            else
+            "📝 *Options (Step 2 of 3)*\n"
+            "───────────────────────\n"
+            f"Question: *{wizard.question}*\n\n"
+            "Send the choices now (one choice per line):\n\n"
+            "💡 *Example:*\n"
+            "Option 1\n"
+            "Option 2\n"
+            "Option 3\n"
+            "Option 4"
+        )
+        await send_text_reply(message, prompt, reply_markup=build_wizard_cancel_keyboard(lang), parse_mode="Markdown")
+        return
+
+    if wizard.step == "options":
+        raw_lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+        opts = []
+        for line in raw_lines:
+            cleaned = re.sub(r"^[A-Za-z0-9أ-ي\-\•\*\)\.\s]+[\)\.\:\-]\s*", "", line).strip()
+            opts.append(cleaned if cleaned else line)
+        if len(opts) < 2:
+            warn = (
+                "⚠️ يرجى إرسال خيارين على الأقل (كل خيار في سطر مستقل)."
+                if lang == "ar"
+                else "⚠️ Please provide at least 2 choices (one per line)."
+            )
+            await send_text_reply(message, warn, reply_markup=build_wizard_cancel_keyboard(lang))
+            return
+        if len(opts) > 10:
+            opts = opts[:10]
+        wizard.options = opts
+        wizard.step = "correct"
+        prompt = (
+            "🎯 *تحديد الإجابة الصحيحة (الخطوة 3 من 3)*\n"
+            "───────────────────────\n"
+            f"السؤال: *{wizard.question}*\n\n"
+            "اضغط على الخيار الصحيح من الأزرار أدناه:"
+            if lang == "ar"
+            else
+            "🎯 *Select Correct Answer (Step 3 of 3)*\n"
+            "───────────────────────\n"
+            f"Question: *{wizard.question}*\n\n"
+            "Tap the correct choice below:"
+        )
+        await send_text_reply(message, prompt, reply_markup=build_wizard_choices_keyboard(wizard.options, lang), parse_mode="Markdown")
+        return
+
+    if wizard.step == "explanation":
+        wizard.explanation = raw_text.strip()
+        await finish_wizard_and_publish(wizard, message, context)
+        return
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -70,6 +159,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     # Private chat flow
     if chat.type == ChatType.PRIVATE:
+        if user:
+            wizard = get_wizard(user.id)
+            if wizard and wizard.chat_id == chat.id:
+                await handle_wizard_step(wizard, message, raw_text, lang, context)
+                return
+
         if inline_request and user:
             await run_ai_flow(
                 message=message,

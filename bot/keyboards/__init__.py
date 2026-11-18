@@ -19,6 +19,10 @@ from bot.keyboards.inline import (
     build_share_keyboard,
     build_study_keyboard,
     build_tools_keyboard,
+    build_wizard_cancel_keyboard,
+    build_wizard_choices_keyboard,
+    build_wizard_completed_keyboard,
+    build_wizard_skip_keyboard,
 )
 
 __all__ = [
@@ -38,4 +42,8 @@ __all__ = [
     "build_external_share_rows",
     "build_quiz_keyboard",
     "build_exam_question_keyboard",
+    "build_wizard_cancel_keyboard",
+    "build_wizard_choices_keyboard",
+    "build_wizard_skip_keyboard",
+    "build_wizard_completed_keyboard",
 ]

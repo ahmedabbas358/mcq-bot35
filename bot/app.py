@@ -9,7 +9,7 @@ import os
 import time
 
 try:
-    from telegram import Update
+    from telegram import BotCommand, BotCommandScopeDefault, Update
     from telegram.ext import (
         ApplicationBuilder,
         CallbackQueryHandler,
@@ -18,6 +18,8 @@ try:
         filters,
     )
 except ImportError:
+    BotCommand = None
+    BotCommandScopeDefault = None
     Update = None
     ApplicationBuilder = None
     CallbackQueryHandler = None
@@ -39,6 +41,7 @@ from bot.handlers import (
     callback_query_handler,
     clearchannel_handler,
     controls_handler,
+    create_handler,
     delivery_handler,
     difficulty_handler,
     exam_handler,
@@ -106,11 +109,50 @@ async def schedule_cleanup() -> None:
 
 
 async def post_init(application) -> None:
-    """Initialize DB schema, web preview server, and schedule tasks upon startup."""
+    """Initialize DB schema, web preview server, bot command menus, and schedule tasks upon startup."""
     await init_db()
     me = await application.bot.get_me()
     application.bot_data["bot_username"] = me.username or ""
     application.bot_data["bot_id"] = me.id
+
+    # Register native Telegram Bot Command Menus for Arabic and English scopes
+    if BotCommand is not None:
+        with contextlib.suppress(Exception):
+            commands_ar = [
+                BotCommand("start", "فتح القائمة الرئيسية التفاعلية"),
+                BotCommand("create", "إنشاء سؤال اختيار من متعدد خطوة بخطوة"),
+                BotCommand("exam", "بدء اختبار تفاعلي فوري"),
+                BotCommand("ai", "توليد أسئلة بالذكاء الاصطناعي"),
+                BotCommand("study", "إنشاء حزمة مذاكرة وبطاقات استذكار"),
+                BotCommand("quizify", "تحويل نص أو مقال إلى أسئلة"),
+                BotCommand("leaderboard", "لوحة الشرف لأعلى الدرجات"),
+                BotCommand("export", "تصدير بنك الأسئلة (Excel/Moodle)"),
+                BotCommand("format", "نموذج كتابة وتنسيق الأسئلة"),
+                BotCommand("difficulty", "تحديد مستوى الصعوبة"),
+                BotCommand("settings", "لوحة التحكم والإعدادات"),
+                BotCommand("stats", "إحصائيات الأسئلة والقنوات"),
+                BotCommand("help", "دليل المساعدة والتعليمات"),
+            ]
+            await application.bot.set_my_commands(commands_ar, scope=BotCommandScopeDefault(), language_code="ar")
+
+            commands_en = [
+                BotCommand("start", "Open Main Interactive Menu"),
+                BotCommand("create", "Step-by-step Question Builder"),
+                BotCommand("exam", "Start Interactive Quiz Exam"),
+                BotCommand("ai", "Generate MCQs with AI"),
+                BotCommand("study", "Generate Study Pack & Flashcards"),
+                BotCommand("quizify", "Convert Text to MCQs"),
+                BotCommand("leaderboard", "View Top Scores Leaderboard"),
+                BotCommand("export", "Export Quizzes to Excel/Moodle/JSON"),
+                BotCommand("format", "Copyable Question Template"),
+                BotCommand("difficulty", "Set AI Difficulty Level"),
+                BotCommand("settings", "Settings Dashboard"),
+                BotCommand("stats", "Usage Statistics"),
+                BotCommand("help", "Help & Usage Guide"),
+            ]
+            await application.bot.set_my_commands(commands_en, scope=BotCommandScopeDefault())
+            logger.info("Native Telegram bot command menus registered successfully")
+
     if ENABLE_WEB_PREVIEW:
         with contextlib.suppress(Exception):
             keep_alive()
@@ -205,6 +247,7 @@ def build_application():
     app.add_handler(CommandHandler("funstyle", funstyle_handler))
 
     # Advanced Features: Export, Exam, Format & Leaderboard
+    app.add_handler(CommandHandler(["create", "new", "بناء", "إنشاء", "انشاء"], create_handler))
     app.add_handler(CommandHandler(["export", "تصدير"], export_handler))
     app.add_handler(CommandHandler(["exam", "test", "اختبار", "امتحان"], exam_handler))
     app.add_handler(CommandHandler(["leaderboard", "top", "المتصدرين", "شرف"], leaderboard_handler))
