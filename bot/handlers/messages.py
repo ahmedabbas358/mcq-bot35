@@ -192,6 +192,72 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await ai_handler(update, context)
             return
 
+        # Arabic commands support (with or without slash)
+        first_token = raw_text.strip().lstrip("/").split()[0].lower() if raw_text.strip() else ""
+        if raw_text.strip().startswith("/") or len(raw_text.strip().split()) == 1:
+            from bot.handlers.commands import (
+                ai_handler,
+                create_handler,
+                difficulty_handler,
+                exam_handler,
+                examples_handler,
+                export_handler,
+                format_handler,
+                help_handler,
+                language_handler,
+                leaderboard_handler,
+                menu_handler,
+                mystats_handler,
+                search_handler,
+                settings_handler,
+                start_handler,
+                stats_handler,
+                study_handler,
+                tools_handler,
+            )
+            arabic_cmd_map = {
+                "ابدأ": start_handler,
+                "ابدا": start_handler,
+                "مساعدة": help_handler,
+                "تعليمات": help_handler,
+                "قائمة": menu_handler,
+                "اوامر": menu_handler,
+                "أوامر": menu_handler,
+                "احصائيات": stats_handler,
+                "إحصائيات": stats_handler,
+                "اعدادات": settings_handler,
+                "إعدادات": settings_handler,
+                "اختبار": exam_handler,
+                "امتحان": exam_handler,
+                "المتصدرين": leaderboard_handler,
+                "شرف": leaderboard_handler,
+                "تصدير": export_handler,
+                "نموذج": format_handler,
+                "تنسيق": format_handler,
+                "إنشاء": create_handler,
+                "انشاء": create_handler,
+                "بناء": create_handler,
+                "صعوبة": difficulty_handler,
+                "المستوى": difficulty_handler,
+                "مستوى": difficulty_handler,
+                "بحث": search_handler,
+                "انجازاتي": mystats_handler,
+                "إنجازاتي": mystats_handler,
+                "تقريري": mystats_handler,
+                "مذاكرة": study_handler,
+                "دراسة": study_handler,
+                "ذكاء": ai_handler,
+                "ادوات": tools_handler,
+                "أدوات": tools_handler,
+                "لغة": language_handler,
+                "اللغة": language_handler,
+                "امثلة": examples_handler,
+                "أمثلة": examples_handler,
+            }
+            if first_token in arabic_cmd_map:
+                await arabic_cmd_map[first_token](update, context)
+                return
+
         if inline_request and user:
             await run_ai_flow(
                 message=message,

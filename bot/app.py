@@ -205,18 +205,18 @@ def build_application():
     app = builder.build()
 
     # Core Navigation & Info Commands
-    app.add_handler(CommandHandler(["start", "ابدأ", "ابدا"], start_handler))
-    app.add_handler(CommandHandler(["help", "مساعدة", "تعليمات"], help_handler))
-    app.add_handler(CommandHandler(["menu", "قائمة", "اوامر"], menu_handler))
-    app.add_handler(CommandHandler(["stats", "احصائيات", "إحصائيات"], stats_handler))
-    app.add_handler(CommandHandler(["settings", "controls", "اعدادات", "إعدادات"], settings_handler))
+    app.add_handler(CommandHandler("start", start_handler))
+    app.add_handler(CommandHandler("help", help_handler))
+    app.add_handler(CommandHandler("menu", menu_handler))
+    app.add_handler(CommandHandler("stats", stats_handler))
+    app.add_handler(CommandHandler(["settings", "controls"], settings_handler))
     app.add_handler(CommandHandler("health", health_handler))
-    app.add_handler(CommandHandler(["examples", "امثلة", "أمثلة"], examples_handler))
+    app.add_handler(CommandHandler("examples", examples_handler))
 
     # Channel & Target Configuration
-    app.add_handler(CommandHandler(["setchannel", "تحديد_القناة"], setchannel_handler))
-    app.add_handler(CommandHandler(["publishhere", "انشر_هنا"], publishhere_handler))
-    app.add_handler(CommandHandler(["clearchannel", "الغاء_القناة"], clearchannel_handler))
+    app.add_handler(CommandHandler("setchannel", setchannel_handler))
+    app.add_handler(CommandHandler("publishhere", publishhere_handler))
+    app.add_handler(CommandHandler("clearchannel", clearchannel_handler))
     app.add_handler(CommandHandler("toggledelete", toggledelete_handler))
 
     # AI Configuration & Profiles
@@ -229,10 +229,10 @@ def build_application():
     app.add_handler(CommandHandler("freemodels", freemodels_handler))
     app.add_handler(CommandHandler("freemodel", freemodel_handler))
     app.add_handler(CommandHandler("setcount", setcount_handler))
-    app.add_handler(CommandHandler(["difficulty", "صعوبة", "المستوى"], difficulty_handler))
+    app.add_handler(CommandHandler(["difficulty", "level"], difficulty_handler))
 
     # User Preferences
-    app.add_handler(CommandHandler(["language", "lang", "لغة"], language_handler))
+    app.add_handler(CommandHandler(["language", "lang"], language_handler))
     app.add_handler(CommandHandler("specialty", specialty_handler))
     app.add_handler(CommandHandler("delivery", delivery_handler))
     app.add_handler(CommandHandler("sharemode", sharemode_handler))
@@ -240,11 +240,11 @@ def build_application():
     app.add_handler(CommandHandler("toggleconfirm", toggleconfirm_handler))
 
     # Study Tools & AI Generation
-    app.add_handler(CommandHandler(["tools", "أدوات", "ادوات"], tools_handler))
+    app.add_handler(CommandHandler("tools", tools_handler))
     app.add_handler(CommandHandler("tool", tool_handler))
-    app.add_handler(CommandHandler(["ask", "اسأل", "سؤال"], ask_handler))
-    app.add_handler(CommandHandler(["study", "مذاكرة", "دراسة"], study_handler))
-    app.add_handler(CommandHandler(["ai", "ذكاء"], ai_handler))
+    app.add_handler(CommandHandler("ask", ask_handler))
+    app.add_handler(CommandHandler("study", study_handler))
+    app.add_handler(CommandHandler("ai", ai_handler))
     app.add_handler(CommandHandler("quizify", quizify_handler))
 
     # Fun Breaks
@@ -253,13 +253,13 @@ def build_application():
     app.add_handler(CommandHandler("funstyle", funstyle_handler))
 
     # Advanced Features: Export, Exam, Format & Leaderboard
-    app.add_handler(CommandHandler(["create", "new", "بناء", "إنشاء", "انشاء"], create_handler))
-    app.add_handler(CommandHandler(["search", "بحث"], search_handler))
-    app.add_handler(CommandHandler(["mystats", "my_stats", "انجازاتي", "إنجازاتي", "تقريري"], mystats_handler))
-    app.add_handler(CommandHandler(["export", "تصدير"], export_handler))
-    app.add_handler(CommandHandler(["exam", "test", "اختبار", "امتحان"], exam_handler))
-    app.add_handler(CommandHandler(["leaderboard", "top", "المتصدرين", "شرف"], leaderboard_handler))
-    app.add_handler(CommandHandler(["format", "نموذج", "تنسيق"], format_handler))
+    app.add_handler(CommandHandler(["create", "new"], create_handler))
+    app.add_handler(CommandHandler("search", search_handler))
+    app.add_handler(CommandHandler(["mystats", "my_stats"], mystats_handler))
+    app.add_handler(CommandHandler("export", export_handler))
+    app.add_handler(CommandHandler(["exam", "test"], exam_handler))
+    app.add_handler(CommandHandler(["leaderboard", "top"], leaderboard_handler))
+    app.add_handler(CommandHandler("format", format_handler))
 
     # Callbacks
     app.add_handler(CallbackQueryHandler(callback_query_handler))
@@ -278,7 +278,10 @@ def build_application():
 
 
 def main() -> None:
-    """Start polling loop for bot."""
+    """Start polling loop for bot and web healthcheck."""
+    if ENABLE_WEB_PREVIEW:
+        with contextlib.suppress(Exception):
+            keep_alive()
     app = build_application()
     logger.info("MCQ Bot v2.0 is starting long polling...")
     app.run_polling(

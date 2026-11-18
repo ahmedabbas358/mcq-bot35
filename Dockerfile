@@ -27,7 +27,7 @@ EXPOSE 8080
 
 # Health check against Flask web preview
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8080/healthz || exit 1
+    CMD curl -f http://localhost:${PORT:-8080}/healthz || exit 1
 
 # Start bot
 CMD ["python", "main.py"]
