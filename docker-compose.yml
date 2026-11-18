@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  mcq-bot:
+    build: .
+    container_name: mcq-bot35
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persist SQLite database on host
+      - ./stats.db:/app/stats.db
+    environment:
+      - PORT=8080
+      - DB_PATH=/app/stats.db
+      - ENABLE_WEB_PREVIEW=true

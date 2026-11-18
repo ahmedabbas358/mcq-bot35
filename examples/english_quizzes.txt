@@ -1,0 +1,27 @@
+Q1: What is the capital of France?
+A) Berlin
+B) Madrid
+C) Paris
+D) Rome
+Answer: C
+Explanation: Paris has been the capital and cultural center of France for centuries.
+
+Q2: Which programming language is widely known as the backbone of modern web browsers?
+A) Python
+B) JavaScript
+C) C++
+D) Rust
+Answer: B
+Explanation: JavaScript is supported natively by all modern web browsers for client-side scripting.
+
+Q3: The speed of light in a vacuum is approximately 300,000 kilometers per second.
+Answer: True
+Explanation: Exactly 299,792,458 meters per second.
+
+Q4: What is the primary function of red blood cells?
+A) Fight infections
+B) Transport oxygen
+C) Form blood clots
+D) Digest food
+Answer: B
+Explanation: Red blood cells contain hemoglobin, which binds to oxygen and distributes it throughout the body.
