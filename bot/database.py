@@ -336,3 +336,78 @@ async def fetch_leaderboard(chat_id: Optional[int] = None, limit: int = 10) -> L
         )
         rows = await (await conn.execute(query, (limit,))).fetchall()
     return [dict(r) for r in rows]
+
+
+async def search_quizzes(query: str, limit: int = 10) -> List[Dict[str, Any]]:
+    """Search stored quizzes by keyword."""
+    conn = await DB.conn()
+    pattern = f"%{query.strip()}%"
+    rows = await (await conn.execute(
+        "SELECT quiz_id, question, options, correct_option, explanation, created_at "
+        "FROM quizzes WHERE question LIKE ? OR explanation LIKE ? ORDER BY created_at DESC LIMIT ?",
+        (pattern, pattern, limit),
+    )).fetchall()
+    results = []
+    for r in rows:
+        try:
+            opts = json.loads(r["options"] or "[]")
+        except Exception:
+            opts = [p for p in (r["options"] or "").split(":::") if p]
+        results.append({
+            "quiz_id": r["quiz_id"],
+            "question": r["question"],
+            "options": opts,
+            "correct_option": r["correct_option"],
+            "explanation": r["explanation"] or "",
+            "created_at": r["created_at"],
+        })
+    return results
+
+
+async def fetch_user_exam_stats(user_id: int) -> Dict[str, Any]:
+    """Fetch rich aggregated exam statistics for a specific user."""
+    conn = await DB.conn()
+    row = await (await conn.execute(
+        "SELECT COUNT(*) AS total_exams, "
+        "COALESCE(AVG(percentage), 0) AS avg_score, "
+        "COALESCE(MAX(percentage), 0) AS best_score, "
+        "COALESCE(MIN(duration), 0) AS best_time, "
+        "COALESCE(SUM(score), 0) AS total_correct, "
+        "COALESCE(SUM(total), 0) AS total_questions "
+        "FROM exam_results WHERE user_id=?",
+        (user_id,),
+    )).fetchone()
+    if not row or row["total_exams"] == 0:
+        return {
+            "total_exams": 0,
+            "avg_score": 0,
+            "best_score": 0,
+            "best_time": 0,
+            "total_correct": 0,
+            "total_questions": 0,
+            "rank": "🌱 مبتدئ (Beginner)",
+        }
+
+    avg = round(row["avg_score"])
+    best = round(row["best_score"])
+    count = row["total_exams"]
+    if avg >= 90 and count >= 5:
+        rank = "👑 أسطوري (Grandmaster)"
+    elif avg >= 80:
+        rank = "🥇 متقدم (Master)"
+    elif avg >= 65:
+        rank = "🥈 كفء (Skilled)"
+    elif avg >= 50:
+        rank = "🥉 مجتاز (Pass)"
+    else:
+        rank = "🌱 متدرب (Apprentice)"
+
+    return {
+        "total_exams": count,
+        "avg_score": avg,
+        "best_score": best,
+        "best_time": row["best_time"],
+        "total_correct": row["total_correct"],
+        "total_questions": row["total_questions"],
+        "rank": rank,
+    }

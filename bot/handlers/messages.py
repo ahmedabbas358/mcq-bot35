@@ -165,6 +165,33 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 await handle_wizard_step(wizard, message, raw_text, lang, context)
                 return
 
+        # Reply keyboard quick actions
+        btn_clean = raw_text.strip()
+        if btn_clean in {"✍️ إنشاء سؤال جديد", "✍️ Create Question"}:
+            from bot.handlers.commands import create_handler
+            await create_handler(update, context)
+            return
+        if btn_clean in {"🎯 بدء اختبار تفاعلي", "🎯 Start Exam"}:
+            from bot.handlers.commands import exam_handler
+            await exam_handler(update, context)
+            return
+        if btn_clean in {"🎓 بطاقة إنجازاتي", "🎓 My Report Card"}:
+            from bot.handlers.commands import mystats_handler
+            await mystats_handler(update, context)
+            return
+        if btn_clean in {"⚙️ الإعدادات", "⚙️ Settings"}:
+            from bot.handlers.commands import settings_handler
+            await settings_handler(update, context)
+            return
+        if btn_clean in {"📋 نموذج التنسيق", "📋 Copyable Template"}:
+            from bot.handlers.commands import format_handler
+            await format_handler(update, context)
+            return
+        if btn_clean in {"🤖 الذكاء الاصطناعي", "🤖 AI Generator"}:
+            from bot.handlers.commands import ai_handler
+            await ai_handler(update, context)
+            return
+
         if inline_request and user:
             await run_ai_flow(
                 message=message,

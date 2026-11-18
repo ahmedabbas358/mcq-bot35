@@ -42,9 +42,11 @@ from bot.database import (
     DB,
     fetch_leaderboard,
     fetch_quiz,
+    fetch_user_exam_stats,
     fetch_user_quizzes,
     get_user_settings,
     resolve_user_lang,
+    search_quizzes,
     update_user_settings,
 )
 from bot.i18n.texts import get_text
@@ -294,6 +296,12 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         except asyncio.QueueFull:
             await send_text_reply(message, get_text("queue_full", lang))
         return
+
+    if getattr(message.chat, "type", None) == ChatType.PRIVATE:
+        with contextlib.suppress(Exception):
+            from bot.keyboards import build_reply_main_menu
+            note = "🌟 تم تثبيت شريط الوصول السريع أسفل الشاشة لراحتك!" if lang == "ar" else "🌟 Quick access bar pinned below for convenience!"
+            await message.reply_text(note, reply_markup=build_reply_main_menu(lang))
 
     await send_text_reply(message, get_text("start", lang), reply_markup=build_main_keyboard(lang))
 
@@ -1142,3 +1150,110 @@ async def create_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "💡 *Example:* What is the capital of Oman?"
         )
     await send_text_reply(message, prompt, reply_markup=build_wizard_cancel_keyboard(lang), parse_mode="Markdown")
+
+
+async def search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Search stored quizzes by keyword (/search <query>)."""
+    message = update.effective_message
+    user = update.effective_user
+    if not message:
+        return
+    lang = await resolve_user_lang(user.id if user else 0, getattr(user, "language_code", None), "")
+    query_text = " ".join(context.args).strip()
+    if not query_text:
+        prompt = (
+            "🔍 *البحث في بنك الأسئلة:*\n"
+            "───────────────────────\n"
+            "يرجى إرسال كلمة البحث بعد الأمر، مثال:\n"
+            "• `/search عاصمة`\n"
+            "• `/بحث الأكسجين`\n"
+            "• `/search Newton`"
+            if lang == "ar"
+            else
+            "🔍 *Search Quiz Bank:*\n"
+            "───────────────────────\n"
+            "Please provide a search term, e.g.:\n"
+            "• `/search capital`\n"
+            "• `/search oxygen`"
+        )
+        await send_text_reply(message, prompt, parse_mode="Markdown")
+        return
+
+    results = await search_quizzes(query_text, limit=5)
+    if not results:
+        not_found = (
+            f"🔍 لم يتم العثور على أي أسئلة مطابقة لـ: *{query_text}*"
+            if lang == "ar"
+            else f"🔍 No questions found matching: *{query_text}*"
+        )
+        await send_text_reply(message, not_found, parse_mode="Markdown")
+        return
+
+    title = (
+        f"🔍 *نتائج البحث عن:* `{query_text}` ({len(results)} نتائج)\n───────────────────────"
+        if lang == "ar"
+        else f"🔍 *Search Results for:* `{query_text}` ({len(results)} found)\n───────────────────────"
+    )
+    lines = [title]
+    for idx, q in enumerate(results, start=1):
+        opts_str = " | ".join(str(o) for o in q["options"][:4])
+        lines.append(f"\n*{idx}. {q['question']}*\n   🔹 {opts_str}")
+        if q.get("explanation"):
+            lines.append(f"   💡 *الشرح:* {q['explanation'][:90]}...")
+
+    await send_text_reply(message, "\n".join(lines), parse_mode="Markdown")
+
+
+async def mystats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Display personal performance report card and gamified ranking."""
+    message = update.effective_message
+    user = update.effective_user
+    if not message or not user:
+        return
+    lang = await resolve_user_lang(user.id, getattr(user, "language_code", None), "")
+    stats = await fetch_user_exam_stats(user.id)
+
+    name = user.full_name or getattr(user, "username", "البطل")
+    total_exams = stats["total_exams"]
+    avg = stats["avg_score"]
+    best = stats["best_score"]
+    best_time = stats["best_time"]
+    correct = stats["total_correct"]
+    total_q = stats["total_questions"]
+    rank = stats["rank"]
+
+    # Progress bar of 10 blocks
+    filled = round(avg / 10)
+    bar = "🟩" * filled + "⬜️" * (10 - filled)
+
+    if lang == "ar":
+        text = (
+            f"🎓 *بطاقة إنجازاتي وسجل أدائي التعليمي:*\n"
+            f"───────────────────────\n"
+            f"👤 *المتدرب:* {name}\n"
+            f"🎖 *الرتبة التعليمية:* {rank}\n\n"
+            f"📊 *إحصائيات الاختبارات التفاعلية:*\n"
+            f"• 📝 عدد الاختبارات المكتملة: *{total_exams}*\n"
+            f"• 🎯 معدل الدقة العام: *{avg}%*\n"
+            f"• 🌟 أعلى نسبة محققة: *{best}%*\n"
+            f"• ⏱ أسرع إنجاز: *{best_time}* ثانية\n"
+            f"• 🎯 الأسئلة الصحيحة: *{correct}* من أصل *{total_q}*\n\n"
+            f"📈 *مؤشر الإتقان التراكمي:*\n"
+            f"[{bar}] *{avg}%*"
+        )
+    else:
+        text = (
+            f"🎓 *My Academic Performance Report:*\n"
+            f"───────────────────────\n"
+            f"👤 *Student:* {name}\n"
+            f"🎖 *Rank:* {rank}\n\n"
+            f"📊 *Exam Statistics:*\n"
+            f"• 📝 Completed Exams: *{total_exams}*\n"
+            f"• 🎯 Average Accuracy: *{avg}%*\n"
+            f"• 🌟 Best Score: *{best}%*\n"
+            f"• ⏱ Fastest Completion: *{best_time}s*\n"
+            f"• 🎯 Total Correct: *{correct}* of *{total_q}*\n\n"
+            f"📈 *Mastery Indicator:*\n"
+            f"[{bar}] *{avg}%*"
+        )
+    await send_text_reply(message, text, reply_markup=build_main_keyboard(lang), parse_mode="Markdown")

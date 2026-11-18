@@ -18,6 +18,18 @@ class ExamSession:
     start_time: float = field(default_factory=time.time)
     lang: str = "ar"
     is_active: bool = True
+    answers_history: List[bool] = field(default_factory=list)
+
+
+def generate_progress_bar(answers: List[bool], total: int) -> str:
+    """Generate a visual score progress indicator: e.g. [🟩🟩🟥⬜️⬜️⬜️]."""
+    bars = []
+    for ans in answers:
+        bars.append("🟩" if ans else "🟥")
+    remaining = total - len(answers)
+    if remaining > 0:
+        bars.extend(["⬜️"] * remaining)
+    return "".join(bars)
 
 
 # In-memory storage of active exams: (user_id, chat_id) -> ExamSession
@@ -90,4 +102,5 @@ def finish_exam(user_id: int, chat_id: int) -> Optional[Dict[str, Any]]:
         "duration": duration_secs,
         "feedback": feedback,
         "lang": session.lang,
+        "progress_bar": generate_progress_bar(session.answers_history, total),
     }

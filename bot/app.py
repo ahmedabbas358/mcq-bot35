@@ -62,10 +62,12 @@ from bot.handlers import (
     language_handler,
     leaderboard_handler,
     menu_handler,
+    mystats_handler,
     provider_handler,
     providers_handler,
     publishhere_handler,
     quizify_handler,
+    search_handler,
     setchannel_handler,
     setcount_handler,
     setmodel_handler,
@@ -127,6 +129,8 @@ async def post_init(application) -> None:
                 BotCommand("quizify", "تحويل نص أو مقال إلى أسئلة"),
                 BotCommand("leaderboard", "لوحة الشرف لأعلى الدرجات"),
                 BotCommand("export", "تصدير بنك الأسئلة (Excel/Moodle)"),
+                BotCommand("search", "البحث في بنك الأسئلة"),
+                BotCommand("mystats", "بطاقة إنجازاتي وسجل أدائي"),
                 BotCommand("format", "نموذج كتابة وتنسيق الأسئلة"),
                 BotCommand("difficulty", "تحديد مستوى الصعوبة"),
                 BotCommand("settings", "لوحة التحكم والإعدادات"),
@@ -144,6 +148,8 @@ async def post_init(application) -> None:
                 BotCommand("quizify", "Convert Text to MCQs"),
                 BotCommand("leaderboard", "View Top Scores Leaderboard"),
                 BotCommand("export", "Export Quizzes to Excel/Moodle/JSON"),
+                BotCommand("search", "Search Quiz Bank"),
+                BotCommand("mystats", "My Performance Report Card"),
                 BotCommand("format", "Copyable Question Template"),
                 BotCommand("difficulty", "Set AI Difficulty Level"),
                 BotCommand("settings", "Settings Dashboard"),
@@ -248,6 +254,8 @@ def build_application():
 
     # Advanced Features: Export, Exam, Format & Leaderboard
     app.add_handler(CommandHandler(["create", "new", "بناء", "إنشاء", "انشاء"], create_handler))
+    app.add_handler(CommandHandler(["search", "بحث"], search_handler))
+    app.add_handler(CommandHandler(["mystats", "my_stats", "انجازاتي", "إنجازاتي", "تقريري"], mystats_handler))
     app.add_handler(CommandHandler(["export", "تصدير"], export_handler))
     app.add_handler(CommandHandler(["exam", "test", "اختبار", "امتحان"], exam_handler))
     app.add_handler(CommandHandler(["leaderboard", "top", "المتصدرين", "شرف"], leaderboard_handler))

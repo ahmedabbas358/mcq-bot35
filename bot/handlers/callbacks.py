@@ -63,6 +63,7 @@ from bot.keyboards.inline import (
 )
 from bot.services.exam_service import (
     finish_exam,
+    generate_progress_bar,
     get_exam,
 )
 from bot.services.exporter import create_export_file
@@ -412,6 +413,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         else:
             correct_label = chr(65 + correct_idx)
             feedback_note = f"❌ إجابة خاطئة. الصحيح: {correct_label}" if session.lang == "ar" else f"❌ Wrong. Correct: {correct_label}"
+        session.answers_history.append(is_correct)
 
         with contextlib.suppress(Exception):
             await query.answer(feedback_note, show_alert=False)
@@ -432,6 +434,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
                         percentage=summary["score"],
                         duration=summary.get("duration", 0),
                     )
+                bar_display = f"\n\n📊 *سجل الإجابات:* [{summary.get('progress_bar', '')}]" if summary.get("progress_bar") else ""
                 result_text = get_text(
                     "exam_finished",
                     session.lang,
@@ -440,7 +443,7 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
                     wrong=summary["wrong"],
                     score=summary["score"],
                     feedback=summary["feedback"],
-                )
+                ) + bar_display
                 with contextlib.suppress(Exception):
                     await query.edit_message_text(result_text, reply_markup=build_main_keyboard(session.lang), parse_mode="Markdown")
             return
@@ -449,7 +452,11 @@ async def callback_query_handler(update: Update, context: ContextTypes.DEFAULT_T
         next_idx = session.current_index
         next_quiz = session.quizzes[next_idx]
         keyboard = build_exam_question_keyboard(next_quiz["options"], next_idx, len(session.quizzes), session.lang)
-        next_text = f"🎯 *السؤال {next_idx + 1} من {len(session.quizzes)}:*\n\n{next_quiz['question']}" if session.lang == "ar" else f"🎯 *Question {next_idx + 1} of {len(session.quizzes)}:*\n\n{next_quiz['question']}"
+        bar = generate_progress_bar(session.answers_history, len(session.quizzes))
+        if session.lang == "ar":
+            next_text = f"🎯 *السؤال {next_idx + 1} من {len(session.quizzes)}* [{bar}]\n───────────────────────\n\n{next_quiz['question']}"
+        else:
+            next_text = f"🎯 *Question {next_idx + 1} of {len(session.quizzes)}* [{bar}]\n───────────────────────\n\n{next_quiz['question']}"
         with contextlib.suppress(Exception):
             await query.edit_message_text(next_text, reply_markup=keyboard, parse_mode="Markdown")
         return

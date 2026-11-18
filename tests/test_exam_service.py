@@ -62,6 +62,11 @@ class TestExamService(unittest.TestCase):
         # Exam should no longer be active
         self.assertIsNone(get_exam(user_id, chat_id))
 
+    def test_progress_bar(self):
+        from bot.services.exam_service import generate_progress_bar
+        bar = generate_progress_bar([True, False, True], 5)
+        self.assertEqual(bar, "🟩🟥🟩⬜️⬜️")
+
 
 if __name__ == "__main__":
     unittest.main()

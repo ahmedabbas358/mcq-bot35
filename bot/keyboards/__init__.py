@@ -25,8 +25,11 @@ from bot.keyboards.inline import (
     build_wizard_skip_keyboard,
 )
 
+from bot.keyboards.reply import build_reply_main_menu
+
 __all__ = [
     "build_main_keyboard",
+    "build_reply_main_menu",
     "build_controls_keyboard",
     "build_language_keyboard",
     "build_delivery_keyboard",
